@@ -11,7 +11,6 @@ object TermParsers extends RegexParsers {
 	def SYM: Parser[String] = """[+\-*/^<>=:]+""".r
 
 
-	/* term =
 
 	/*
 	 * expr = NUM
@@ -20,14 +19,14 @@ object TermParsers extends RegexParsers {
 	 */
 
 	def expr(parent: TermList): Parser[Term] =
-			NUM ^^ { parent.createFun(_, Nil)} |
+			NUM ^^ { parent.createFun(_, new Array[Term](0))} |
 			ID ~ opt( "(" ~> arglist(parent) <~ ")") ^^ {
-				case id ~ Some(args) => parent.createFun(id, args)
+				case id ~ Some(args) => parent.createFun(id, args.toArray)
 				case id ~ None => parent.createVar(id)
 			} |
 			SYM ~ opt( "(" ~> arglist(parent) <~ ")") ^^ {
-				case sym ~ Some(args) => parent.createFun(sym, args)
-				case sym ~ None => parent.createFun(sym, Nil)
+				case sym ~ Some(args) => parent.createFun(sym, args.toArray)
+				case sym ~ None => parent.createFun(sym, new Array[Term](0))
 			}
 
 
@@ -39,7 +38,7 @@ object TermParsers extends RegexParsers {
 
 	def rule : Parser[RWRule] = {
 		val list = new TermList;
-		expr(list) ~ ("->" ~> expr(list) ~ opt("<=" ~>  conditions(list))) ^^ {
+		expr(list) ~ ("->" ~> expr(list) ~ opt("<=" ~> conditions(list))) ^^ {
 			case lhs ~ (rhs ~ Some(cs)) => new ConditionalRule(list, lhs, rhs, cs)
 			case lhs ~ (rhs ~ None) => new Rule(list, lhs, rhs)
 		}
@@ -57,7 +56,17 @@ object TermParsers extends RegexParsers {
 		}
 	}
 
-	def trs : Parser[TRS] =
-		rep(rule) ^^ { case rs => new TRS(rs) }
+	def ruleList : Parser[List[RWRule]] =
+		opt(rule ~ ruleList) ^^ {
+			case Some(r ~ rs) => r :: rs
+			case None => Nil
+		}
+
+	/*def trs : Parser[TRS] =
+		rep(rule) ^^ { case rs => new TRS(rs) }*/
+	def trs : Parser[TRS] = // rep does not work because we need to create a new TermList for every rule
+	    // If I use rep, a new one is only created for the first, while one is reused for every other one
+		// fixme (is this a bug?)
+		ruleList ^^ { case rs => new TRS(rs) }
 
 }

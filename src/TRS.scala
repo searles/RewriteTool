@@ -3,7 +3,7 @@ import scala.annotation.tailrec
 /**
  * Created by searles on 09.04.15.
  */
-class TRS(val rules : List[RWRule]) {
+class TRS(val rules : List[RWRule]) extends (Term => Term) {
 
 	override def toString() : String = rules.mkString("; ")
 
@@ -22,19 +22,28 @@ class TRS(val rules : List[RWRule]) {
 
 
 trait RWRule {
-	def applicable(t: Term, trs: TRS): Boolean
+	def applicable(t: Term, mapping: TRS): Boolean
 	def rhs(target: TermList): Term
+}
+
+class CP(val list: TermList, val peak: Term, val l: Term, val r: Term) {
+	// critical pair
+
 }
 
 class Rule(val list: TermList, val lhs: Term, val rhs: Term) extends RWRule {
 	override def toString() : String = lhs + " -> " + rhs
 
-	def applicable(t: Term, trs: TRS): Boolean = lhs matching t
+	def applicable(t: Term, mapping: TRS): Boolean = lhs matching t
 
 	def rhs(target: TermList): Term = {
 		val ret = target insert rhs;
-		lhs unmatch;
+		lhs unmatch();
 		ret
+	}
+
+	def criticalPair(other: Rule): List[CP] = {
+		null
 	}
 }
 
@@ -42,9 +51,9 @@ class ConditionalRule(val list: TermList, val lhs: Term, val rhs: Term, val cs: 
 
 	override def toString() : String = lhs + " -> " + rhs + " <= " + cs.mkString(", ")
 
-	def applicable(t: Term, trs: TRS): Boolean =
+	def applicable(t: Term, mapping: TRS): Boolean =
 		if(lhs matching t) {
-			if(cs.forall(_.satisfied(t.parent, trs))) {
+			if(cs.forall(_.satisfied(t.parent, mapping))) {
 				true
 			} else {
 				lhs unmatch ;
@@ -64,17 +73,17 @@ class ConditionalRule(val list: TermList, val lhs: Term, val rhs: Term, val cs: 
 class Condition(val list: TermList, val s: Term, val t: Term) {
 	override def toString() : String = s + " ->* " + t
 
-	def satisfied(target: TermList, trs: TRS): Boolean = {
+	def satisfied(target: TermList, mapping: TRS): Boolean = {
 		// it is assumed that there is a matcher used already
 		val sPrime = target insert s;
 
 		// store links in termlist and clear them
-		val backup = list.terms.map (term => { val ret = term.link ; term.link = null; ret })
 
-		val u = sPrime map trs
+		val backup = list.backup
 
-		// restore links
-		(list.terms, backup).zipped.foreach{_.link = _}
+		val u = sPrime map(mapping)
+
+		list.restore(backup)
 
 		t matching u
 	}
