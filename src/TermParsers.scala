@@ -10,8 +10,6 @@ object TermParsers extends RegexParsers {
 	def ID: Parser[String] = """[a-zA-Z]\w*""".r
 	def SYM: Parser[String] = """[+\-*/^<>=:]+""".r
 
-
-
 	/*
 	 * expr = NUM
 	 *      | ID ( '(' arglist ')' )?
