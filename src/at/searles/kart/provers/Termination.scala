@@ -1,7 +1,8 @@
-import DependencyPairs.DP
+package at.searles.kart.provers
+
+import at.searles.kart.terms._
 
 import scala.annotation.tailrec
-import scala.collection.immutable
 import scala.collection.immutable.TreeMap
 
 /**
@@ -61,6 +62,7 @@ package object DependencyPairs {
 		else false
 	}
 }
+
 
 package object GraphAlgorithms {
 	// FIXME: functionalize!

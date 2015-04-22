@@ -1,3 +1,5 @@
+import at.searles.kart.provers.{AFAlgorithms, GraphAlgorithms, DependencyPairs}
+import at.searles.kart.terms.{TermList, Parsing, Rule}
 
 /**
  * Created by searles on 09.04.15.
@@ -63,4 +65,12 @@ object Main extends scala.App {
 			case Some(af) => println(scc + " has AF " + af); true
 		}
 	})
+
+
+
+	val parent = new TermList
+
+	val t1 = parent.expr("(A (\\x.x)) B").get
+
+	println(t1)
 }

@@ -1,3 +1,7 @@
+package at.searles.kart.provers
+
+import at.searles.kart.terms._
+
 /**
  * Created by searles on 15.04.15.
  */
@@ -15,7 +19,7 @@ object Confluence {
 
 		def getCPs(lp: Term, pos: List[Int]): Option[CP] = lp match {
 			case Var(_, _) => None
-			case _ if(pos == Nil && alpha.eq(betaPrime)) => None // self overlap at root position
+			case _ if pos == Nil && alpha.eq(betaPrime) => None // self overlap at root position
 			case _ => if(lp.unification(beta.lhs)) {
 				try {
 					val cplist = new TermList
@@ -26,7 +30,7 @@ object Confluence {
 					lp.ununify(beta.lhs)
 					Some(new CP(peak, lrp, ralpha, pos == Nil))
 				} catch {
-					case e: OccurCheck => { lp.ununify(beta.lhs); None }
+					case e: OccurCheck => lp ununify beta.lhs; None
 				}
 			} else None
 
@@ -43,11 +47,12 @@ object Confluence {
 		println(cp)
 		val u = cp.lr2p.map(trs)
 		val v = cp.r1.map(trs)
-		println(u + " ==? " + v);
+		println(u + " ==? " + v)
 		u eq v
 	})
 }
 
+
 class CP(val peak: Term, val lr2p: Term, val r1: Term, val isOverlay: Boolean) {
-	override def toString(): String = peak + " -> [" + lr2p + "; "  + r1 + "]" + isOverlay
+	override def toString: String = peak + " -> [" + lr2p + "; "  + r1 + "]" + isOverlay
 }

@@ -1,6 +1,7 @@
+package at.searles.kart.terms
+
 import scala.annotation.tailrec
 import scala.collection.immutable.TreeMap
-import scala.collection.mutable
 
 /**
  * Created by searles on 09.04.15.
@@ -10,7 +11,7 @@ class TermList {
 	var last: Term = null
 	var vars: Map[String, Var] = new TreeMap[String, Var]()
 
-	def toList(): List[Term] = toList(head)
+	def toList: List[Term] = toList(head)
 
 	private def toList(t: Term): List[Term] = if(t == null) Nil else t :: toList(t.next)
 
@@ -19,7 +20,7 @@ class TermList {
 		else toString(s + "; " + t, t.next)
 	}
 
-	override def toString() = if(head == null) "" else toString(head.toString, head.next)
+	override def toString = if(head == null) "" else toString(head.toString(), head.next)
 
 	// backup link fields (reverse order)
 	// fixme: possible speedup: in conditional rules, store in an order such that
@@ -47,9 +48,16 @@ class TermList {
 	def restore(backup: Array[Term]) : Unit = restore(head, backup)
 
 	def term(str: String) : Option[Term] = {
-		TermParsers.parseAll(TermParsers.expr(this), str) match {
+		TermParsers.parseAll(TermParsers.term(this), str) match {
 			case TermParsers.Success(t, _) => Some(t)
-			case TermParsers.NoSuccess(_, _) => None
+			case _ => None
+		}
+	}
+
+	def expr(str: String): Option[Term] = {
+		TermParsers.parseAll(TermParsers.expr(this, List.empty[String]), str) match {
+			case TermParsers.Success(t, _) => Some(t)
+			case _ => None
 		}
 	}
 
@@ -99,11 +107,16 @@ class TermList {
 	}
 
 	def createApp(l: Term, r: Term): App = {
-		val max = if (l.pos > r.pos) l else r
-		createApp(l, r, max.next)
+		val debruijnmax = l.debruijn max r.debruijn
+
+		val lPrime = if(l.debruijn < debruijnmax) l.updateDebruijn(debruijnmax) else l
+		val rPrime = if(r.debruijn < debruijnmax) r.updateDebruijn(debruijnmax) else r
+
+		val max = if (lPrime.pos > rPrime.pos) lPrime else rPrime
+		createApp(lPrime, rPrime, max.next)
 	}
 
-	@tailrec private def createLambda(t: Term, node: Term) : Lambda = t match {
+	@tailrec private def createLambda(t: Term, node: Term) : Lambda = node match {
 		case null => Lambda(t, this)
 		case (lambda @ Lambda(t2, _)) if t.eq(t2) => lambda // found it
 		case u => createLambda(t, u.next)

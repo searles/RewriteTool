@@ -1,11 +1,11 @@
+package at.searles.kart.terms
+
 import scala.annotation.tailrec
-
-
 /**
  * Created by searles on 09.04.15.
  * Term class.
  */
-sealed abstract class Term(val parent: TermList) extends Iterable[Term] {
+sealed abstract class Term(val parent: TermList, val debruijn: Int) extends Iterable[Term] {
 	var next: Term = null
 
 	// append to parent
@@ -22,8 +22,11 @@ sealed abstract class Term(val parent: TermList) extends Iterable[Term] {
 
 	// some fields for algorithms
 	var is: Term = null
+
 	var link: Term = null
 	var mark: Boolean = false
+
+	var isDebruijn: Term = null
 
 	// ----------- traversal -------------------------------------------
 
@@ -239,6 +242,51 @@ sealed abstract class Term(val parent: TermList) extends Iterable[Term] {
 		}
 	}
 
+	private def auxDebruijn(max: Int, low: Int): Term = {
+		if(isDebruijn != null) isDebruijn
+		else {
+			isDebruijn =
+				if(link != null && link != this) link.auxDebruijn(max, low)
+				else this match {
+					case App(l, r, _) =>
+						val lPrime = l.auxDebruijn(max, low)
+						val rPrime = r.auxDebruijn(max, low)
+
+						if (lPrime.eq(l) && rPrime.eq(r)) this
+						else parent.createApp(lPrime, rPrime)
+					case Lambda(t, _) =>
+						val tPrime = t.auxDebruijn(max, low)
+
+						if (tPrime eq t) this
+						else parent.createLambda(tPrime)
+					case Fun(f, args, _) =>
+						val argsPrime = args.map (_.auxDebruijn (max, low))
+
+						if((0 until args.length).forall(i => argsPrime(i).eq(args(i)))) this
+						else parent.createFun(f, args)
+					case LambdaVar(index, _) =>
+						if(index < low) this
+						else parent.createLambdaVar(index + (max - low))
+					case other => other
+				}
+
+			isDebruijn
+		}
+	}
+
+	private def unsetDebruijn(): Unit = {
+		if(isDebruijn != null) {
+			isDebruijn = null
+			this.foreach(_.unsetDebruijn())
+		}
+	}
+
+	def updateDebruijn(max: Int): Term = {
+		val ret = auxDebruijn(max, debruijn)
+		unsetDebruijn()
+		ret
+	}
+
 	// --------------- unification  ------------------
 
 	def unification(that: Term): Boolean = {
@@ -334,13 +382,13 @@ sealed abstract class Term(val parent: TermList) extends Iterable[Term] {
 		}
 	}
 
-	def map(mapping: Term => Term): Term = {
+	def applym(mapping: Term => Term): Term = {
 		//Counter.count = Counter.count + 1; // fixme remove
 		if (link != null)
 			link
 		else {
 			val u = mapping(this) ;
-			this.link = if(u == null) auxmap(mapping) else u map mapping
+			this.link = if(u == null) auxmap(mapping) else u applym mapping
 			this.link
 		}
 	}
@@ -349,40 +397,48 @@ sealed abstract class Term(val parent: TermList) extends Iterable[Term] {
 		case Fun(f, args, _) =>
 			args.foreach(_.map(mapping))
 			if (args.forall(t => t.eq(t.link))) this
-			else parent.createFun(f, args.map(_.link)).map(mapping)
+			else parent.createFun(f, args.map(_.link)).applym(mapping)
 		case App(l, r, _) =>
 			l.map(mapping); r.map(mapping)
 			if(l.link.eq(l) && r.link.eq(r)) this
-			else parent.createApp(l, r).map(mapping)
+			else parent.createApp(l, r).applym(mapping)
 		case Lambda(t, _) => this // FIXME
 		case _ => this // it is a leaf node
 	}
 }
 
-case class Fun(f: String, args: Array[Term], p: TermList) extends Term(p) {
+case class Fun(f: String, args: Array[Term], p: TermList) extends Term(p, args.foldLeft(0)(_ max _.debruijn)) {
 	//override def toString() : String = pos + ":" + f + " " + args.map(_.pos)
 	override def toString: String = f + "(" + args.mkString(", ") + ")"
 }
 
-case class Var(id: String, p: TermList) extends Term(p) {
+case class Var(id: String, p: TermList) extends Term(p, 0) {
 	override def toString: String = id
 }
 
-case class App(l: Term, r: Term, p: TermList) extends Term(p) {
-	override def toString : String = l + " " + r
+case class App(l: Term, r: Term, p: TermList) extends Term(p, l.debruijn max r.debruijn) {
+	override def toString : String = (l match {
+			case _: Lambda => "(" + l + ")"
+			case _ => l.toString()
+		}) + " " + (r match {
+			case _: App | _: Lambda => "(" + r + ")"
+			case _ => r.toString()
+		}
+	)
 }
 
 /*case class Const(val id: String, p: TermList) extends Term(p) {
 	override def toString() : String = id
 }*/
 
-case class Lambda(t: Term, p: TermList) extends Term(p) {
-
+case class Lambda(t: Term, p: TermList) extends Term(p, t.debruijn + 1) {
+	// careful: debruijn = lambda index + 1
+	override def toString = "\\" + (debruijn - 1) + "." + t
 }
 
 // deBruijn-Index
-case class LambdaVar(index: Int, p: TermList) extends Term(p) {
-
+case class LambdaVar(index: Int, p: TermList) extends Term(p, 0) {
+	override def toString = "%" + index
 }
 
 class OccurCheck(val t: Term) extends RuntimeException {

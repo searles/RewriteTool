@@ -1,10 +1,11 @@
+package at.searles.kart.terms
+
 import scala.annotation.tailrec
-import scala.collection.immutable.{TreeMap, TreeSet}
+import scala.collection.immutable.TreeMap
 import scala.collection.mutable
-import scala.xml.Null
 
 /**
- * Created by searles on 09.04.15.
+ * File contains classes and elements for basic term rewriting
  */
 class TRS(val rules : List[RWRule]) extends (Term => Term) {
 
@@ -19,10 +20,13 @@ class TRS(val rules : List[RWRule]) extends (Term => Term) {
 	}
 
 	def defined(): Set[String] = rules.map {
-		case rule: Rule => rule.lhs match { case Fun(f, _, _) => f}
+		case rule: Rule => rule.lhs match {
+			case Fun(f, _, _) => f
+			case _ => sys.error("bad format")
+		}
+		case _ => sys.error("bad format")
 	}.toSet
 }
-
 
 trait RWRule {
 	def applicable(t: Term, mapping: TRS): Boolean
@@ -30,13 +34,13 @@ trait RWRule {
 }
 
 class Rule(val list: TermList, val lhs: Term, val rhs: Term) extends RWRule {
-	override def toString() : String = lhs + " -> " + rhs
+	override def toString: String = lhs + " -> " + rhs
 
 	def applicable(t: Term, mapping: TRS): Boolean = lhs matching t
 
 	def rhs(target: TermList): Term = {
-		val ret = target insert rhs;
-		lhs unmatch();
+		val ret = target insert rhs
+		lhs unmatch()
 		ret
 	}
 
@@ -80,43 +84,43 @@ class Rule(val list: TermList, val lhs: Term, val rhs: Term) extends RWRule {
 
 class ConditionalRule(val list: TermList, val lhs: Term, val rhs: Term, val cs: List[Condition]) extends RWRule {
 
-	override def toString() : String = lhs + " -> " + rhs + " <= " + cs.mkString(", ")
+	override def toString : String = lhs + " -> " + rhs + " <= " + cs.mkString(", ")
 
 	def applicable(t: Term, mapping: TRS): Boolean =
 		if(lhs matching t) {
 			if(cs.forall(_.satisfied(t.parent, mapping))) {
 				true
 			} else {
-				lhs unmatch ;
-				cs.foreach(_.t.unmatch) // also call unmatch on all rhs's of conditions
+				lhs unmatch()
+				cs.foreach(_.t.unmatch()) // also call unmatch on all rhs's of conditions
 				false
 			}
 		} else false
 
 	def rhs(target: TermList): Term = {
-		val ret = target insert rhs;
-		lhs unmatch;
-		cs.foreach(_.t.unmatch) // also call unmatch on all rhs's of conditions
+		val ret = target insert rhs
+		lhs unmatch()
+		cs.foreach(_.t.unmatch()) // also call unmatch on all rhs's of conditions
 		ret
 	}
 }
 
 class Condition(val list: TermList, val s: Term, val t: Term) {
-	override def toString() : String = s + " ->* " + t
+	override def toString : String = s + " ->* " + t
 
 	def satisfied(target: TermList, mapping: TRS): Boolean = {
 		// it is assumed that there is a matcher used already
-		val sPrime = target insert s;
+		val sPrime = target insert s
 
 		// store links in termlist and clear them
 
 		val backup = list.backup
 
-		val u = sPrime map(mapping)
+		val u = sPrime applym mapping
 
 		list.restore(backup)
 
-		t matching u
+		t.matching(u)
 	}
 }
 
@@ -138,4 +142,3 @@ object Parsing {
 			case TermParsers.NoSuccess(_, _) => None
 		}
 }
-
