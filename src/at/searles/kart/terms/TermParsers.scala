@@ -3,9 +3,10 @@ package at.searles.kart.terms
 import scala.util.parsing.combinator.RegexParsers
 
 /**
- * Created by searles on 09.04.15.
+ * Parser for all kinds of terms and TRSs. I am using my own format here.
  */
 object TermParsers extends RegexParsers {
+
 	def NUM: Parser[String] = """\d+""".r
 	def ID: Parser[String] = """[a-zA-Z]\w*""".r
 	def SYM: Parser[String] = """[+\-*/^<>=:]+""".r

@@ -22,7 +22,7 @@ class TRS(val rules : List[RWRule]) extends (Term => Term) {
 	def defined(): Set[String] = rules.map {
 		case rule: Rule => rule.lhs match {
 			case Fun(f, _, _) => f
-			case _ => sys.error("bad format")
+			case _ => sys.error("bad format: " + rule)
 		}
 		case _ => sys.error("bad format")
 	}.toSet

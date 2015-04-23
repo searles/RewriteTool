@@ -2,7 +2,6 @@ package at.searles.kart.terms
 
 import scala.annotation.tailrec
 /**
- * Created by searles on 09.04.15.
  * Term class.
  */
 sealed abstract class Term(val parent: TermList, val debruijn: Int) extends Iterable[Term] {
@@ -173,12 +172,13 @@ sealed abstract class Term(val parent: TermList, val debruijn: Int) extends Iter
 		// linearizes the term
 		// for this purpose, first get a list of all variables and positions
 		val m = varpos()
-		m.foldLeft(this)((term, vp) => vp._2 match {
-			case Nil => sys.error("bug. varpos returned empty list")
-			// one variable may keep its name
-			case p :: poss =>
-				var suffix = -1
-				poss.foldLeft(term)((t, pos) => t.replace(parent.createVar(vp._1 + {suffix += 1 ; "$lin" + suffix}), pos))
+		m.foldLeft(this)((term, vp) => {
+			var suffix = -1
+			vp._2.foldLeft(term)((t, pos) => t.replace(parent.createVar(
+			{
+				suffix += 1
+				vp._1 + "$lin" + suffix
+			}), pos))
 		})
 	}
 
@@ -289,15 +289,34 @@ sealed abstract class Term(val parent: TermList, val debruijn: Int) extends Iter
 
 	// --------------- unification  ------------------
 
+	def assertLinkIsNull: Unit = {
+		if(link != null) sys.error("link is not null: " + this + " -> " + this.link)
+		this.foreach(_.assertLinkIsNull)
+	}
+
 	def unification(that: Term): Boolean = {
+		//println("unify\t" + this + "\t" + that)
 		if(this == that) true
 		else if(this.link != null) {
 			this.link.unification(that)
 		} else if(that.link != null) {
 			this.unification(that.link)
 		} else {
-			if(auxunification(that)) { this.link = that ; true }
-			else false
+			this match {
+				case fun@Fun(f, args, _) => that match {
+					case v2@Var(id, _) =>
+						v2.link = fun
+						true
+					case fun2@Fun(f2, args2, _) if (f == f2) && (args.length == args2.length) && argunification(0, args, args2) =>
+						fun.link = fun2
+						true
+					case _ => false
+				}
+				case Var(_, _) =>
+					this.link = that
+					true
+				case _ => sys.error("not implemented")
+			}
 		}
 	}
 
@@ -309,25 +328,18 @@ sealed abstract class Term(val parent: TermList, val debruijn: Int) extends Iter
 	}
 
 
-	private def auxunification(that: Term): Boolean = this match {
-		case fun @ Fun(f, args, _) => that match {
-			case v2 @ Var(id, _) => v2.link = fun ; true
-			case fun2 @ Fun(f2, args2, _) if (f == f2) && (args.length == args2.length) &&
-				argunification(0, args, args2) => true
-			case _ => false
-		} case Var(_, _) => this.link = that ; true
-		case _ => sys.error("not implemented")
-	}
-
 	def ununify(that: Term): Unit = {
+		// fixme this is a bad way of writing this.
+
 		// assert: !(this.link != null & that.link != null)
+		//println("!!ify\t" + this + "\t" + that)
 		if(this.link != null) {
 			this.link.ununify(that)
 			this.link = null
 			// call ununify on subterms
 			// assert: if 'this' has a subterm at pos i, then so does that.
 			(0 until arity()).foreach(i => this.at(i).ununify(that at i))
-		} else if(that.link != null) {
+		} else if(that != null && that.link != null) {
 			that.ununify(this)
 		}
 	}

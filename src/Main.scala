@@ -1,13 +1,15 @@
-import at.searles.kart.provers.{AFAlgorithms, GraphAlgorithms, DependencyPairs}
+import at.searles.kart.coco.TPDBParser
+import at.searles.kart.provers.{Termination, AFAlgorithms, GraphAlgorithms, DependencyPairs}
 import at.searles.kart.terms.{TermList, Parsing, Rule}
+import scala.io.Source
 
 /**
- * Created by searles on 09.04.15.
+ * Main program for experiments
  */
 object Main extends scala.App {
 	//println((0 until 0).forall(_ > 1))
 
-	val trs = Parsing.trs(
+	/*val trs = Parsing.trs(
 			"+(x,0) -> x" +
 			"+(x,s(y)) -> s(+(x,y))" +
 			"-(s(x),s(y)) -> -(x,y)" +
@@ -64,13 +66,38 @@ object Main extends scala.App {
 			case None => println("No AF found: " + scc); false
 			case Some(af) => println(scc + " has AF " + af); true
 		}
+	})*/
+
+	// for each file in trs.tag, read it
+	val trsFiles = Source.fromFile("COCO-DB/tags/trs.tag").getLines()
+	val terminatingFiles = Source.fromFile("COCO-DB/tags/terminating.tag").getLines().toSet
+
+	var positive = List.empty[String]
+	var negative = List.empty[String]
+
+	// read each file and parse the trs
+	trsFiles.foreach(filename => {
+		val source = Source.fromFile("COCO-DB/" + filename).getLines().mkString("\n")
+		val trs = TPDBParser.parse(TPDBParser.spec, source).get
+
+		println("Checking " + filename + "...")
+		val taggedTerminating = terminatingFiles.contains(filename)
+
+		val isTerminating = Termination.terminationTest(trs)
+
+		(isTerminating, taggedTerminating) match {
+			case (true, true) => positive = filename :: positive; println("SUCCESS")
+			case (false, true) => negative = filename :: negative; println("Terminating but could not be shown")
+			case (true, false) =>
+				sys.error("that is bad. \n\n" + source + "\n");
+			case _ => println("not terminating")
+		}
+
+
+		(1 to 40).foreach { i => print("=") }
+		println("\n\n")
 	})
 
-
-
-	val parent = new TermList
-
-	val t1 = parent.expr("(A (\\x.x)) B").get
-
-	println(t1)
+	println("termination could be shown of the following: " + positive)
+	println("termination could not be shown of the following: " + negative)
 }

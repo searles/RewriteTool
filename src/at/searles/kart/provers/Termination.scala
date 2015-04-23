@@ -1,9 +1,12 @@
 package at.searles.kart.provers
 
+import at.searles.kart.coco.TPDBParser
+import at.searles.kart.provers.DependencyPairs.DP
 import at.searles.kart.terms._
 
 import scala.annotation.tailrec
 import scala.collection.immutable.TreeMap
+import scala.io.Source
 
 /**
  * Design:
@@ -15,22 +18,23 @@ import scala.collection.immutable.TreeMap
  *
  */
 package object DependencyPairs {
-	type DP = Pair[Term, Term]
+	type DP = Pair[Fun, Fun]
 
 	// convert the lhs of the rule and the given subterm to a dp
 	// be sure to only use these functions to create a Dependency Pair, otherwise
 	// they might not be equal
 	private def getDPInstance(lhs: Fun, subterm: Term, defined: Set[String]): Option[DP] = subterm match {
-		case fun@Fun(f, _, _) if defined.contains(f) =>
+		case fun@Fun(f, _, _) if defined.contains(f) && !lhs.hasSubterm(fun) => // subterm is due to Derschowitz
 			val termlist = new TermList()
 			val l = convertTermToDP(lhs, termlist)
 			val r = convertTermToDP(fun, termlist)
+
 			Some(new DP(l, r))
 		case _ => None
 	}
 
 	// convert the fun into a DP-term (call only if fun is rooted by a defined symbol)
-	private def convertTermToDP(fun: Fun, target: TermList): Term = {
+	private def convertTermToDP(fun: Fun, target: TermList): Fun = {
 		val newargs = fun.args.map(target.insert(_)) // fixme can be more efficient by using merge (don't forget unmerge)
 		target.createFun(fun.f + "#", newargs)
 	}
@@ -55,11 +59,14 @@ package object DependencyPairs {
 	// simple approximation whether two DPs are connected using unification
 	def isConnected(dp0: DP, dp1: DP, defined: Set[String]): Boolean = {
 		val sPrime = dp0._2.con(defined).lin()
+		val tPrime = dp1._1
 
-		if (sPrime.unification(dp1._1)) {
-			sPrime.ununify(dp1._1); true
+		if (sPrime.unification(tPrime)) {
+			sPrime.ununify(tPrime)
+			true
+		} else {
+			false
 		}
-		else false
 	}
 }
 
@@ -112,7 +119,7 @@ package object GraphAlgorithms {
 
 object EmptyArgumentFiltering extends ArgumentFiltering(TreeMap.empty[String, Either[Int, List[Int]]])
 
-class ArgumentFiltering protected (val map: TreeMap[String, Either[Int, List[Int]]]) extends (Term => Term) {
+class ArgumentFiltering(val map: TreeMap[String, Either[Int, List[Int]]]) extends (Term => Term) {
 
 	override def toString: String = map.foldRight("")((entry, str) =>
 		entry._1 + ": " + (entry._2 match {
@@ -122,7 +129,7 @@ class ArgumentFiltering protected (val map: TreeMap[String, Either[Int, List[Int
 	)
 
 	override def apply(t: Term): Term = t match {
-		case fun@Fun(f, args, _) => {
+		case fun@Fun(f, args, _) =>
 			val e = map(f)
 			if(e.isLeft) {
 				// this one is easy
@@ -132,7 +139,6 @@ class ArgumentFiltering protected (val map: TreeMap[String, Either[Int, List[Int
 				val newargs = e.right.get.map(i => this(args(i)))
 				t.parent.createFun(f, newargs.toArray)
 			}
-		}
 		case v@Var(_, _) => v
 		case _ => sys.error("not supported")
 	}
@@ -163,6 +169,103 @@ class ArgumentFiltering protected (val map: TreeMap[String, Either[Int, List[Int
 }
 
 package object AFAlgorithms {
+
+	// Algorithm 1: findSimpleArgumentFiltering
+	// * for all function symbols that are created by the dependency pair framework
+	//   pick one argument position. If we can simplify one scc, we can remove this pair.
+
+
+	// So, we start from a list of dependency pairs (most likely an scc).
+	//   function returns the remaining pairs of the scc and the argument filtering
+	//   or none if none could be found.
+
+	def findSimpleArgumentFiltering(pairs: List[DP]): Option[(List[DP], ArgumentFiltering)] = {
+		auxFindSimpleAF(pairs, Nil, Nil, EmptyArgumentFiltering)
+	}
+
+	// pairs: remaining pairs to be processed
+	// equalPairs: those DPs that were already processed and for which af(l) = af(r).
+	// af: Argument Filtering so far.
+	def auxFindSimpleAF(pairs: List[DP], equal: List[DP], strict: List[DP],
+						af: ArgumentFiltering): Option[(List[DP], ArgumentFiltering)] = pairs match {
+		case Nil => if (strict.isEmpty) None else Some(equal, af) // everything was processed
+		case (pair@(lhs, rhs)) :: tail =>
+			// go through all arguments
+			@tailrec def loop(i: Int, t: Fun): Option[(List[DP], ArgumentFiltering)] =
+				if(i >= t.arity()) None else {
+					auxFindSimpleAF(pairs, equal, strict, af + (t.f, i)) match {
+						case some@Some(_) => some
+						case None => loop(i + 1, t)
+					}
+				}
+
+			// function of (i, af) => B
+			if(!af.contains(lhs.f)) loop(0, lhs)
+			else if(!af.contains(rhs.f)) loop(0, rhs)
+			else {
+				val lPrime = lhs.args(af.map(lhs.f).left.get)
+				val rPrime = rhs.args(af.map(rhs.f).left.get)
+
+				val isSubterm = lPrime.hasSubterm(rPrime)
+				val isEq = lPrime eq rPrime
+
+				if(lPrime.hasSubterm(rPrime)) auxFindSimpleAF(tail, equal, pair :: strict, af)
+				else if(lPrime.eq(rPrime)) auxFindSimpleAF(tail, pair :: equal, strict, af)
+				else None
+			}
+	}
+
+
+
+
+
+	/*def findArgumentFiltering(terms: List[Term], pi: ArgumentFiltering,
+							  afCheck: ArgumentFiltering => Boolean): Option[ArgumentFiltering] = terms match {
+		case (fun@Fun(f, args, _)) :: tail if pi.contains(f) =>
+			findArgumentFiltering(pi.filteredArgs(fun).foldRight(tail)(_ :: _), pi, afCheck)
+		case fun@Fun(f, args, _) :: _ if !pi.contains(f) => // go through all filterings for f (some-heuristics)
+			val arity = args.length
+			// first, list of all elements
+			// next, empty list
+			// finally,  every single number
+
+			// first call for empty filtering
+			val emptyPi = findArgumentFiltering(terms, pi + (f, List.empty[Int]), afCheck)
+			if(emptyPi != None) {
+				emptyPi
+			} else if(arity > 0) {
+				// next call for all single filterings
+
+				// they are enumerated in the following function
+				@tailrec def loop(i: Int): Option[ArgumentFiltering] = {
+					if (i < arity) {
+						val nextPi = pi + (f, i)
+						findArgumentFiltering(terms, nextPi, afCheck) match {
+							case Some(af) => Some(af)
+							case None => loop(i + 1)
+						}
+					} else {
+						None
+					}
+				}
+
+				loop(0) match {
+					case None => {
+						// final case: full filtering
+						findArgumentFiltering(terms, pi + (f, (0 until arity).toList), afCheck)
+					}
+					case s => s
+				}
+			} else {
+				None
+			}
+		case Var(_, _) :: tail => findArgumentFiltering(tail, pi, afCheck)
+		case Nil => if(afCheck(pi)) Some(pi) else None // we found an AF.
+		case u => sys.error("not supported: " + u)
+	}
+
+
+
 	def find(pairs: List[Pair[Term, Term]]): Option[ArgumentFiltering] = {
 		def subtermCriterion(af: ArgumentFiltering): Boolean =
 			pairs.forall(pair => af.satisfiesSubtermCriterion(pair._1, pair._2))
@@ -219,5 +322,41 @@ package object AFAlgorithms {
 		case Var(_, _) :: tail => findArgumentFiltering(tail, pi, afCheck)
 		case Nil => if(afCheck(pi)) Some(pi) else None // we found an AF.
 		case u => sys.error("not supported: " + u)
+	}*/
+}
+
+package object Termination {
+	def simpleDP(dps: List[DP], definedFuns: Set[String]): Boolean = {
+		val dpGraph = DependencyPairs.dpGraph(dps, definedFuns)
+
+		println("Dependency Pair Graph:")
+		dpGraph.foreach(p => p._2.foreach(p2 => println(p._1 + "\t->\t" + p2)))
+
+		val sccs = GraphAlgorithms.tarjan(dpGraph)
+
+		sccs.forall(scc => {
+			println("Processing scc " + scc)
+			AFAlgorithms.findSimpleArgumentFiltering(scc) match {
+				case Some(pair) =>
+					println(pair._2 + " for " + scc + ", " + pair._1 + " remaining")
+					simpleDP(pair._1, definedFuns)
+				case None => false
+			}}
+		)
+	}
+
+	def terminationTest(trs: TRS): Boolean = {
+			println(trs.rules.mkString("\n"))
+			// check termination
+			// Termination proof
+			val definedFuns = trs.defined() // error if one rule is not headed by a fun
+			val rules = trs.rules.map { case r: Rule => r } // error if a rule is not an unconditional rule
+
+			val dps = rules.map(DependencyPairs.ruleToDP(_, definedFuns)).flatten
+
+			println("Dependency Pairs")
+			dps.foreach(println(_));
+
+			simpleDP(dps, definedFuns)
 	}
 }
