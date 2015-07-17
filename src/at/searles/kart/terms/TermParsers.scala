@@ -1,11 +1,15 @@
 package at.searles.kart.terms
 
+import at.searles.kart.terms.rewriting._
+
 import scala.util.parsing.combinator.RegexParsers
 
 /**
  * Parser for all kinds of terms and TRSs. I am using my own format here.
  */
-object TermParsers extends RegexParsers {
+object TermParsers extends TermParsers
+
+class TermParsers extends RegexParsers {
 
 	def NUM: Parser[String] = """\d+""".r
 	def ID: Parser[String] = """[a-zA-Z]\w*""".r
@@ -67,6 +71,7 @@ object TermParsers extends RegexParsers {
 		}
 	}
 		
+	def term: Parser[Term] = term(new TermList)
 
 	// num, f(args)
 	def term(parent: TermList): Parser[Term] =
@@ -88,37 +93,16 @@ object TermParsers extends RegexParsers {
 			case None => Nil
 		}
 
-	def rule : Parser[RWRule] = {
-		val list = new TermList
-		term(list) ~ ("->" ~> term(list) ~ opt("<=" ~> conditions(list))) ^^ {
-			case lhs ~ (rhs ~ Some(cs)) => new ConditionalRule(list, lhs, rhs, cs)
-			case lhs ~ (rhs ~ None) => new Rule(list, lhs, rhs)
-		}
-	}
 
-	def conditions(list: TermList) : Parser[List[Condition]] = {
-		condition(list) ~ rep("," ~> condition(list)) ^^ {
-			case c0 ~ ctail => c0 :: ctail
-		}
-	}
-
-	def condition(list: TermList) : Parser[Condition] = {
-		term(list) ~ ("->" ~> term(list)) ^^ {
-			case s ~ t => new Condition(list, s, t)
-		}
-	}
-
-	def ruleList : Parser[List[RWRule]] =
+	/*def ruleList : Parser[List[RWRule]] =
 		opt(rule ~ ruleList) ^^ {
 			case Some(r ~ rs) => r :: rs
 			case None => Nil
 		}
 
-	/*def trs : Parser[TRS] =
-		rep(rule) ^^ { case rs => new TRS(rs) }*/
-	def trs : Parser[TRS] = // rep does not work because we need to create a new TermList for every rule
+	def trs : Parser[GenericTRS] = // rep does not work because we need to create a new TermList for every rule
 	    // If I use rep, a new one is only created for the first, while one is reused for every other one
 		// fixme (is this a bug?)
-		ruleList ^^ { case rs => new TRS(rs) }
-
+		ruleList ^^ { case rs => new GenericTRS(rs) }
+*/
 }

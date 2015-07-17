@@ -1,12 +1,10 @@
 package at.searles.kart.provers
 
-import at.searles.kart.coco.TPDBParser
-import at.searles.kart.provers.DependencyPairs.DP
-import at.searles.kart.terms._
+import at.searles.kart.terms.{Var, Fun, TermList, Term}
+import at.searles.kart.terms.rewriting.{TRS, Rule}
 
 import scala.annotation.tailrec
 import scala.collection.immutable.TreeMap
-import scala.io.Source
 
 /**
  * Design:
@@ -17,59 +15,79 @@ import scala.io.Source
  *         * package object DependencyPairs
  *
  */
-package object DependencyPairs {
-	type DP = Pair[Fun, Fun]
 
-	// convert the lhs of the rule and the given subterm to a dp
-	// be sure to only use these functions to create a Dependency Pair, otherwise
-	// they might not be equal
-	private def getDPInstance(lhs: Fun, subterm: Term, defined: Set[String]): Option[DP] = subterm match {
-		case fun@Fun(f, _, _) if defined.contains(f) && !lhs.hasSubterm(fun) => // subterm is due to Derschowitz
-			val termlist = new TermList()
-			val l = convertTermToDP(lhs, termlist)
-			val r = convertTermToDP(fun, termlist)
+case class DP(l: Fun, r: Fun) extends Ordered[DP] {
+	assert (l.parent eq r.parent)
 
-			Some(new DP(l, r))
-		case _ => None
+	override def equals(o: Any): Boolean = o match {
+		case dp: DP => this.compare(dp) == 0
+		case _ => false
 	}
 
-	// convert the fun into a DP-term (call only if fun is rooted by a defined symbol)
-	private def convertTermToDP(fun: Fun, target: TermList): Fun = {
-		val newargs = fun.args.map(target.insert(_)) // fixme can be more efficient by using merge (don't forget unmerge)
-		target.createFun(fun.f + "#", newargs)
-	}
-
-	def ruleToDP(rule: Rule, defined: Set[String]): List[DP] = {
-		rule.lhs match {
-			case lhs: Fun => rule.rhs.subterms().map(getDPInstance(lhs, _, defined)).flatten
-			case _ => sys.error("lhs must be fun")
-		}
-	}
-
-	def dpGraph(dps: List[DP], defined: Set[String]): Map[DP, Set[DP]] = {
-		dps.foldLeft(List.empty[(DP, Set[DP])])(
-			(map, dp0) => (dp0,
-				dps.foldLeft(List.empty[DP])(
-					(lst, dp1) => if (isConnected(dp0, dp1, defined)) dp1 :: lst else lst
-				).toSet
-				) :: map
-		).toMap
-	}
-
-	// simple approximation whether two DPs are connected using unification
-	def isConnected(dp0: DP, dp1: DP, defined: Set[String]): Boolean = {
-		val sPrime = dp0._2.con(defined).lin()
-		val tPrime = dp1._1
-
-		if (sPrime.unification(tPrime)) {
-			sPrime.ununify(tPrime)
-			true
-		} else {
-			false
+	override def compare(dp :DP): Int = {
+		assert(l.parent eq dp.l.parent)
+		l.compare(dp.l) match {
+			case 0 => r.compare(dp.r)
+			case i => i
 		}
 	}
 }
 
+object DependencyPairs {
+	def dpGraph(dps: Set[DP], defined: Set[String]): Map[DP, Set[DP]] = {
+		dps.foldLeft(Map.empty[DP, Set[DP]])(
+			(map, dp0) => map +
+				(dp0 -> dps.foldLeft(Set.empty[DP])((set, dp1) => if (isConnected(dp0, dp1, defined)) set + dp1 else set))
+		)
+	}
+
+	def isConnected(dp0: DP, dp1: DP, defined: Set[String]): Boolean = {
+		val tmp = new TermList
+		val t0 = tmp.insert(dp0.r).con(defined, "con").lin("lin")
+		val t1 = tmp insert dp1.l
+
+		// since we only use this termlist once, no need to ununify
+		t0.unification(t1)
+	}
+}
+
+class DependencyPairs(rules: List[Rule]) {
+	val list = new TermList // term list to contain all dependency pairs
+	val defined = rules.map(_.lhs.f).toSet
+
+	// DP(l -> r) = l# -> s# where r = C[s], root(s) defined and s
+	// is NOT a proper subterm of l.
+
+	// return all subterms of the rhs that give rise to a DP
+	def dpTerms(rule: Rule): List[Fun] = {
+
+		// mark proper subterms of lhs so that it would not be considered in DFS-find.
+		rule.lhs.foreach(_.mark = true)
+
+		val ret = rule.rhs.findAll {
+			case fun@Fun(f, _, _) if defined.contains(f) => true
+			case _ => false
+		}.asInstanceOf[List[Fun]]
+
+		// unmark
+		rule.lhs.foreach(_.mark = false)
+
+		ret
+	}
+
+	private def toDPTerm(fun: Fun): Fun = {
+		val newargs = fun.args.map(list.insert) // fixme can be more efficient by using merge (don't forget unmerge)
+		list.createFun(fun.f + "#", newargs)
+	}
+
+	def toDP(l: Fun, r: Fun): DP = DP(toDPTerm(l), toDPTerm(r))
+
+	val dps = rules.foldLeft(Set.empty[DP])((set, rule) => dpTerms(rule).foldLeft(set)((set2, r) => set2 + toDP(rule.lhs, r)))
+
+	def dpGraph() = DependencyPairs.dpGraph(dps, defined)
+
+	def dpGraph(dps: Set[DP]) = DependencyPairs.dpGraph(dps, defined)
+}
 
 package object GraphAlgorithms {
 	// FIXME: functionalize!
@@ -119,9 +137,9 @@ package object GraphAlgorithms {
 
 object EmptyArgumentFiltering extends ArgumentFiltering(TreeMap.empty[String, Either[Int, List[Int]]])
 
-class ArgumentFiltering(val map: TreeMap[String, Either[Int, List[Int]]]) extends (Term => Term) {
+class ArgumentFiltering(val filtering: TreeMap[String, Either[Int, List[Int]]]) extends (Term => Term) {
 
-	override def toString: String = map.foldRight("")((entry, str) =>
+	override def toString(): String = filtering.foldRight("")((entry, str) =>
 		entry._1 + ": " + (entry._2 match {
 			case Left(p) => p
 			case Right(ps) => "{" + ps.mkString(", ") + "}"
@@ -130,7 +148,7 @@ class ArgumentFiltering(val map: TreeMap[String, Either[Int, List[Int]]]) extend
 
 	override def apply(t: Term): Term = t match {
 		case fun@Fun(f, args, _) =>
-			val e = map(f)
+			val e = filtering(f)
 			if(e.isLeft) {
 				// this one is easy
 				this(args(e.left.get))
@@ -148,11 +166,11 @@ class ArgumentFiltering(val map: TreeMap[String, Either[Int, List[Int]]]) extend
 		this(t).hasSubterm(this(subterm))
 	}
 
-	def contains(f: String): Boolean = map.contains(f)
+	def contains(f: String): Boolean = filtering.contains(f)
 
 	// returns list of args of fun that are filtered
 	def filteredArgs(fun: Fun): List[Term] = {
-		val e = map(fun.f) ;
+		val e = filtering(fun.f) ;
 		if(e.isLeft) fun.args(e.left.get) :: Nil
 		else e.right.get.map(fun.args(_))
 	}
@@ -160,15 +178,17 @@ class ArgumentFiltering(val map: TreeMap[String, Either[Int, List[Int]]]) extend
 	// the following two create a new
 	// next one should be operator
 	def +(f: String, pos: Int): ArgumentFiltering = {
-		new ArgumentFiltering(map + (f -> Left(pos)))
+		new ArgumentFiltering(filtering + (f -> Left(pos)))
 	}
 
 	def +(f: String, poss: List[Int]): ArgumentFiltering = {
-		new ArgumentFiltering(map + (f -> Right(poss)))
+		new ArgumentFiltering(filtering + (f -> Right(poss)))
 	}
 }
 
-package object AFAlgorithms {
+package object ArgumentFilteringSubtermSimple {
+	// From MiddeldorpHirokawa04
+
 
 	// Algorithm 1: findSimpleArgumentFiltering
 	// * for all function symbols that are created by the dependency pair framework
@@ -189,10 +209,10 @@ package object AFAlgorithms {
 	def auxFindSimpleAF(pairs: List[DP], equal: List[DP], strict: List[DP],
 						af: ArgumentFiltering): Option[(List[DP], ArgumentFiltering)] = pairs match {
 		case Nil => if (strict.isEmpty) None else Some(equal, af) // everything was processed
-		case (pair@(lhs, rhs)) :: tail =>
+		case dp :: tail =>
 			// go through all arguments
 			@tailrec def loop(i: Int, t: Fun): Option[(List[DP], ArgumentFiltering)] =
-				if(i >= t.arity()) None else {
+				if(i >= t.length) None else {
 					auxFindSimpleAF(pairs, equal, strict, af + (t.f, i)) match {
 						case some@Some(_) => some
 						case None => loop(i + 1, t)
@@ -200,17 +220,17 @@ package object AFAlgorithms {
 				}
 
 			// function of (i, af) => B
-			if(!af.contains(lhs.f)) loop(0, lhs)
-			else if(!af.contains(rhs.f)) loop(0, rhs)
+			if(!af.contains(dp.l.f)) loop(0, dp.l)
+			else if(!af.contains(dp.r.f)) loop(0, dp.r)
 			else {
-				val lPrime = lhs.args(af.map(lhs.f).left.get)
-				val rPrime = rhs.args(af.map(rhs.f).left.get)
+				val lPrime = dp.l.args(af.filtering(dp.l.f).left.get)
+				val rPrime = dp.r.args(af.filtering(dp.r.f).left.get)
 
 				val isSubterm = lPrime.hasSubterm(rPrime)
 				val isEq = lPrime eq rPrime
 
-				if(lPrime.hasSubterm(rPrime)) auxFindSimpleAF(tail, equal, pair :: strict, af)
-				else if(lPrime.eq(rPrime)) auxFindSimpleAF(tail, pair :: equal, strict, af)
+				if(lPrime.hasSubterm(rPrime)) auxFindSimpleAF(tail, equal, dp :: strict, af)
+				else if(lPrime.eq(rPrime)) auxFindSimpleAF(tail, dp :: equal, strict, af)
 				else None
 			}
 	}
@@ -326,37 +346,36 @@ package object AFAlgorithms {
 }
 
 package object Termination {
-	def simpleDP(dps: List[DP], definedFuns: Set[String]): Boolean = {
-		val dpGraph = DependencyPairs.dpGraph(dps, definedFuns)
+	def simpleDP(dps: List[DP], definedFuns: Set[String]): Option[Boolean] = {
+		// FIXME: This jumping from lists to Sets is not nice.
+		val dpGraph = DependencyPairs.dpGraph(dps.toSet, definedFuns)
 
-		println("Dependency Pair Graph:")
-		dpGraph.foreach(p => p._2.foreach(p2 => println(p._1 + "\t->\t" + p2)))
+		dpGraph.foreach(entry => Logging.i("dp-graph", entry.toString()))
 
 		val sccs = GraphAlgorithms.tarjan(dpGraph)
 
-		sccs.forall(scc => {
-			println("Processing scc " + scc)
-			AFAlgorithms.findSimpleArgumentFiltering(scc) match {
-				case Some(pair) =>
-					println(pair._2 + " for " + scc + ", " + pair._1 + " remaining")
+		// FIXME: non-termination here.
+		val status = sccs.map(scc => {
+			ArgumentFilteringSubtermSimple.findSimpleArgumentFiltering(scc) match {
+				case Some(pair) => // found argument-filtering
+					Logging.i("af", pair._2 + " for " + scc + ", " + pair._1 + " remaining")
 					simpleDP(pair._1, definedFuns)
-				case None => false
+				case None => Logging.i("af", "no filtering found for " + scc); None
 			}}
 		)
+
+		status.foldLeft(Some(true): Option[Boolean])((ret, s) => s match {
+			case Some(true) => ret
+			case Some(false) => sys.error("not implemented")
+			case None => None
+		})
 	}
 
-	def terminationTest(trs: TRS): Boolean = {
-			println(trs.rules.mkString("\n"))
-			// check termination
-			// Termination proof
-			val definedFuns = trs.defined() // error if one rule is not headed by a fun
-			val rules = trs.rules.map { case r: Rule => r } // error if a rule is not an unconditional rule
+	def terminationTest(rules: List[Rule]): Option[Boolean] = {
+		val deppairs = new DependencyPairs(rules)
 
-			val dps = rules.map(DependencyPairs.ruleToDP(_, definedFuns)).flatten
+		deppairs.dps.foreach(dp => Logging.i("dps", dp.toString))
 
-			println("Dependency Pairs")
-			dps.foreach(println(_));
-
-			simpleDP(dps, definedFuns)
+		simpleDP(deppairs.dps.toList, deppairs.defined)
 	}
 }

@@ -1,52 +1,76 @@
 package at.searles.kart.terms
 
+import at.searles.kart.provers.Logging
+
 import scala.annotation.tailrec
 import scala.collection.immutable.TreeMap
+import scala.collection.Iterable
 
-/**
- * Created by searles on 09.04.15.
- */
-class TermList {
-	var head: Term = null
-	var last: Term = null
+class TermList extends Iterable[Term] {
+	var headNode: Term = null
+	var lastNode: Term = null
 	var vars: Map[String, Var] = new TreeMap[String, Var]()
 
-	def toList: List[Term] = toList(head)
+	/*override def ==(that: AnyRef) = sys.error("not allowed")
+	override def !=(that: AnyRef) = sys.error("not allowed")*/
 
-	private def toList(t: Term): List[Term] = if(t == null) Nil else t :: toList(t.next)
+	override def equals(o: Any): Boolean = throw new IllegalArgumentException("not comparable")
 
-	@tailrec private def toString(s: String, t: Term): String = {
-		if(t == null) s
-		else toString(s + "; " + t, t.next)
-	}
-
-	override def toString = if(head == null) "" else toString(head.toString(), head.next)
-
-	// backup link fields (reverse order)
-	// fixme: possible speedup: in conditional rules, store in an order such that
-	// all links are occupied from left to right
-	@tailrec private def backup(node: Term, data: Array[Term]): Unit =
-		if(node != null) {
-			data(node.pos) = node.link
-			node.link = null
-			backup(node.next, data)
-		}
+	override def toString() = this.mkString(" -- ")
 
 	def backup : Array[Term] = {
-		val array = new Array[Term](last.pos + 1)
-		backup(head, array)
+		val array = new Array[Term](lastNode.pos + 1)
+		this.foreach(t => { array(t.pos) = t.link ; t.link = null })
 		array
 	}
 
-	@tailrec private def restore(node: Term, backup: Array[Term]): Unit = {
-		if (node != null) {
-			node.link = backup(node.pos)
-			restore(node.next, backup)
+	def restore(backup: Array[Term]) : Unit =
+		this.foreach(t => { t.link = backup(t.pos) })
+
+	def clear(): Unit = this.foreach(_.link = null)
+
+	def iterator = new Iterator[Term]() {
+		var i = headNode
+		override def hasNext = i ne null
+		override def next() = {
+			val ret = i
+			i = i.next
+			ret
 		}
 	}
 
-	def restore(backup: Array[Term]) : Unit = restore(head, backup)
+	// returns true if any variable has been renamed
+	def renaming(blacklist: Set[String]): Map[Var, String] = {
+		vars.foldLeft(Map.empty[Var, String])((m, entry) => {
+			val id = entry._1
+			if(blacklist.contains(id)) {
+				// find first entry
+				// FIXME would be nice to have a stream that returns the new name
 
+				def newids(prefix: String) = new Iterator[String] {
+					var i = 0
+
+					override def hasNext = true
+					override def next() = { i = i + 1; prefix + "#" + i }
+				}
+
+				// FIXME: Proof that this is in fact enough
+				val newid = newids(id).find(
+					newid => !blacklist.contains(newid) && !vars.contains(newid)
+				).get
+
+				m + (entry._2 -> newid)
+			} else {
+				m
+			}
+		})
+	}
+
+
+
+	// Parser stuff
+
+	// parses a FO-term
 	def term(str: String) : Option[Term] = {
 		TermParsers.parseAll(TermParsers.term(this), str) match {
 			case TermParsers.Success(t, _) => Some(t)
@@ -54,6 +78,7 @@ class TermList {
 		}
 	}
 
+	// parses an HO-term
 	def expr(str: String): Option[Term] = {
 		TermParsers.parseAll(TermParsers.expr(this, List.empty[String]), str) match {
 			case TermParsers.Success(t, _) => Some(t)
@@ -61,6 +86,14 @@ class TermList {
 		}
 	}
 
+	def funs: List[String] = {
+		this.foldRight(List.empty[String])((t, l) => t match {
+			case Fun(f, _, _) => f :: l
+			case _ => l
+		})
+	}
+
+	// now intersting thing: inserting terms.
 	def insert(t: Term) : Term = {
 		val u = t merge this // fixme what if exception?
 		t unsetIs()
@@ -73,7 +106,7 @@ class TermList {
 		case u => createLambdaVar(index, u.next)
 	}
 
-	def createLambdaVar(index: Int): LambdaVar = createLambdaVar(index, head)
+	def createLambdaVar(index: Int): LambdaVar = createLambdaVar(index, headNode)
 
 	@tailrec private def createVar(id: String, node: Term) : Var = node match {
 		case null => val v = Var(id, this) ; vars += (id -> v) ; v // add v to vars
@@ -81,22 +114,23 @@ class TermList {
 		case u => createVar(id, u.next)
 	}
 
-	def createVar(id: String): Var = createVar(id, head)
+	def createVar(id: String): Var = createVar(id, headNode)
 
 	@tailrec private def createFun(f: String, args: Array[Term], node: Term) : Fun = node match {
 		case null => Fun(f, args, this)
 		case (fun @ Fun(f2, args2, _)) if f == f2 &&
 				args.length == args2.length &&
-				(0 until args.length).forall(i => args(i) eq args2(i))
+				args.indices.forall(i => args(i) eq args2(i))
 			=> fun // found it
 		case u => createFun(f, args, u.next)
 	}
 
 	def createFun(f: String, args: Array[Term]): Fun =
-		if (args.isEmpty) createFun(f, args, head)
+		if (args.isEmpty) createFun(f, args, headNode) // if no arguments start searching from top
 		else {
+			//Logging.d("createfun", "args = " + args.mkString(", "))
 			val max = args.maxBy(_.pos)
-			createFun(f, args, max.next)
+			createFun(f, args, max.next) // otherwise find latest argument
 		}
 
 

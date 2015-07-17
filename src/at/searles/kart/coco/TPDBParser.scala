@@ -1,13 +1,19 @@
 package at.searles.kart.coco
 
-import at.searles.kart.terms.TermParsers._
+import at.searles.kart.coco.ConditionType.ConditionType
 import at.searles.kart.terms._
+import at.searles.kart.terms.rewriting._
 
 import scala.util.parsing.combinator.RegexParsers
 
 /**
   * Created by searles on 22.04.15.
   */
+object ConditionType extends Enumeration {
+	type ConditionType = Value
+	val oriented, join, semieq = Value
+}
+
 object TPDBParser extends RegexParsers {
 
 	def NUM: Parser[String] = """\d+""".r
@@ -16,14 +22,32 @@ object TPDBParser extends RegexParsers {
 
 	def SYM: Parser[String] = """[+\-*/^<>=:.]+""".r
 
-	def spec: Parser[TRS] =
-		varspec >> { rulespec(_) } | rulespec(Set.empty[String])
+	def ctrsspec: Parser[CTRS] =  conditiontype >>
+		(ctype => varspec >> {
+			condrulespec(ctype, _)
+		} | condrulespec(ctype, Set.empty[String]))
+
+	def conditiontype: Parser[ConditionType] =
+		(("(" ~ "CONDITIONTYPE" ) ~>
+			("ORIENTED" | "JOIN" | "SEMI-EQUATIONAL")
+			) <~ ")" ^^ {
+				case "ORIENTED" => ConditionType.oriented
+				case "JOIN" => ConditionType.join
+				case "SEMI-EQUATIONAL" => ConditionType.semieq}
+
+	def condrulespec(ctype: ConditionType, vars: Set[String]): Parser[CTRS] = ("(" ~ "RULES") ~> ctrs(ctype, vars) <~ ")"
+
+	def trsspec: Parser[TRS] =
+		varspec >> { rulespec } | rulespec(Set.empty[String])
 
 	def varspec: Parser[Set[String]] = ("(" ~ "VAR") ~> rep(ID) <~ ")" ^^ {
 		_.toSet
 	}
 
 	def rulespec(vars: Set[String]): Parser[TRS] = ("(" ~ "RULES") ~> trs(vars) <~ ")"
+
+
+	def term(vars: Set[String]): Parser[Term] = term(new TermList, vars)
 
 	// num, f(args)
 	def term(parent: TermList, vars: Set[String]): Parser[Term] =
@@ -48,33 +72,37 @@ object TPDBParser extends RegexParsers {
 		}
 
 	def rule(vars: Set[String]): Parser[Rule] = {
-		val list = new TermList
-		term(list, vars) ~ ("->" ~> term(list, vars)) ^^ {
-			case lhs ~ rhs => new Rule(list, lhs, rhs)
+		term(vars) ~ ("->" ~> term(vars)) ^^ {
+			case lhs ~ rhs => Rule.make(lhs, rhs)
 		}
 	}
 
-	/*def rule(vars: Set[String]) : Parser[RWRule] = {
-		val list = new TermList
-		term(list, vars) ~ ("->" ~> term(list, vars) ~ opt("<=" ~> conditions(list, vars))) ^^ {
-			case lhs ~ (rhs ~ Some(cs)) => new ConditionalRule(list, lhs, rhs, cs)
+	def condrule(condtype: ConditionType, vars: Set[String]): Parser[ConditionalRule] = {
+		rule(vars) ~ conditions(condtype, vars) ^^ { case r ~ cs => ConditionalRule.make(r, cs) }
+	}
+
+	def conditions(condtype: ConditionType, vars: Set[String]) : Parser[List[Condition]] =
+		opt("|" ~> condition(condtype, vars) ~ rep("," ~> condition(condtype, vars))) ^^ {
+			case None => List.empty[Condition]
+			case Some(c ~ cs) => c :: cs
+		}
+
+	def condition(condtype: ConditionType, vars: Set[String]) : Parser[Condition] = {
+		term(vars) ~ ("==" ~> term(vars)) ^^ {
+			case s ~ t =>
+				if(condtype == ConditionType.join) new Joinability(s, t)
+				else if(condtype == ConditionType.oriented) new Reducibility(s, t)
+				else if(condtype == ConditionType.semieq) new SemiEq(s, t)
+				else sys.error("unknown condition type")
 		}
 	}
 
-	def conditions(list: TermList, vars: Set[String]) : Parser[List[Condition]] =
-		(condition(list, vars) ~ rep("," ~> condition(list, vars))) ^^ mkList
-
-	def condition(list: TermList, vars: Set[String]) : Parser[Condition] = {
-		term(list, vars) ~ ("->" ~> term(list, vars)) ^^ {
-			case s ~ t => new Condition(list, s, t)
-		}
-	}*/
-
-	def rulelist(vars: Set[String]): Parser[List[RWRule]] = rep(rule(vars))
-
-	/*def trs : Parser[TRS] =
-		rep(rule) ^^ { case rs => new TRS(rs) }*/
-	def trs(vars: Set[String]): Parser[TRS] = rulelist(vars) ^^ {
+	def trs(vars: Set[String]): Parser[TRS] = rep(rule(vars)) ^^ {
 		new TRS(_)
 	}
+
+	def ctrs(ctype: ConditionType, vars: Set[String]): Parser[CTRS] = rep(condrule(ctype, vars)) ^^ {
+		new CTRS(_)
+	}
+
 }
