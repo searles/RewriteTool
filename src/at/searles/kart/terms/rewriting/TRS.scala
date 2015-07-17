@@ -161,6 +161,7 @@ case class Rule private(lhs: Fun, rhs: Term) {
 	}
 
 	def renaming(blacklist: Set[String]): Rule = {
+		// FIXME Bug in here!
 		val sigma = list.renaming(blacklist)
 
 		if (sigma.nonEmpty) {
@@ -169,7 +170,7 @@ case class Rule private(lhs: Fun, rhs: Term) {
 			sigma.foreach(entry => entry._1.link = tl.createVar(entry._2))
 
 			// now create rule
-			val ret = Rule(lhs.asInstanceOf[Fun], rhs)
+			val ret = Rule.make(tl.insert(lhs), tl.insert(rhs))
 
 			// and clean up
 			sigma.foreach(entry => entry._1.link = null)

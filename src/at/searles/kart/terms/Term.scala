@@ -283,16 +283,15 @@ sealed abstract class Term(val parent: TermList, val debruijn: Int) extends Orde
 	}*/
 
 	def isLinear: Boolean = {
-		// FIXME: For all subterms, if it is a variable that is already true, it is not linear, else mark = true.
-
-		val vars = collection.mutable.Set.empty[String]
-
 		def aux(t: Term): Boolean = t match {
-			case Var(id, _) => vars.add(id) // returns false if already exists
-			case _ => this.forall(aux)
+			case v: Var => if(v.mark) false else { v.mark = true ; true }
+			case _ => t.mark = true ; t.forall(aux)
 		}
 
-		aux(this)
+		val ret = aux(this)
+		unmark()
+
+		ret
 	}
 
 

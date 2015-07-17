@@ -59,14 +59,8 @@ object Main extends scala.App {
 
 	def cpTest(): Unit = {
 		val trs = TRSParser.parse(
-			"+(x,0) -> x" +
-				"+(x,s(y)) -> s(+(x,y))" +
-				"+(x,s(y)) -> +(s(x),y)" +
-				"+(s(x),y) -> s(+(y,x))"
+			"f(f(x)) -> g(x)"
 		).get
-
-		//val t = new TermList().term("+(+(0,0), +(s(0),0))").get
-		//val t = new TermList().term("+(+(s(0), s(0)), +(0, s(0)))").get
 
 		val cps = Confluence.criticalpairs(trs.rules)
 

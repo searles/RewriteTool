@@ -29,30 +29,30 @@ object Confluence {
 		// rename betaPrime st it does not share variables with other terms
 		val beta = betaPrime.renaming(alpha.list.vars.keySet)
 
-		Logging.d("cps", alpha + " cps with " + betaPrime + "?")
+		Logging.d("cps", alpha + " cps with " + beta + "?")
 
 		def filterSelfOverlay(t: Term, p: List[Int]) = alpha.ne(betaPrime) || p.nonEmpty
 
 		def toCP(t: Term, p: List[Int]): Option[CP] = t match {
 			case v: Var => None
 			case _ => if(t.unification(beta.lhs)) {
-				//Logging.d("cps", t + " unifiable with " + beta.lhs)
+				Logging.d("cps", t + " unifiable with " + beta.lhs + " at " + p.reverse)
 				try {
 					val cplist = new TermList
 					val peak = cplist.insert(alpha.lhs)
-					val left = t.replace(cplist.insert(beta.rhs), p)
+					val left = alpha.lhs.replace(cplist.insert(beta.rhs), p)
 					val right = cplist.insert(alpha.rhs)
 
 					t.ununify(beta.lhs)
 					Some(new CP(peak, left, right, p.isEmpty))
 				} catch {
 					case e: OccurCheck =>
-						//Logging.d("cps", t + " occur check with " + beta.lhs)
+						Logging.d("cps", t + " occur check with " + beta.lhs)
 						t ununify beta.lhs
 						None
 				}
 			} else {
-				//Logging.d("cps", t + " not unifiable with " + beta.lhs)
+				Logging.d("cps", t + " not unifiable with " + beta.lhs)
 				None
 			}
 		}
@@ -66,6 +66,8 @@ object Confluence {
 	// FIXME: Yes, No, Maybe
 	def confluenceCheckNoModularity(rules: List[Rule]): Option[Boolean] = {
 		val cps = criticalpairs(rules)
+
+		Logging.d("conf", rules.mkString("; ") + " has cps " + cps.mkString("; "))
 
 		// some properties
 		val isOverlay = cps.forall(_.isOverlay)
