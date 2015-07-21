@@ -1,6 +1,6 @@
-package at.searles.kart.provers
+package at.searles.scart.provers
 
-import at.searles.kart.terms.rewriting.Rule
+import at.searles.scart.terms.rewriting.Rule
 
 object Modularity {
 	// for modularity properties

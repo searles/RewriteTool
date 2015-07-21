@@ -1,4 +1,4 @@
-package at.searles.kart.terms
+package at.searles.scart.terms
 
 /**
  * Types for higher order

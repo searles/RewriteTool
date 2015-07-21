@@ -1,7 +1,7 @@
-package at.searles.kart.provers
+package at.searles.scart.provers
 
-import at.searles.kart.terms.{Var, Fun, TermList, Term}
-import at.searles.kart.terms.rewriting.{TRS, Rule}
+import at.searles.scart.terms.{Var, Fun, TermList, Term}
+import at.searles.scart.terms.rewriting.{TRS, Rule}
 
 import scala.annotation.tailrec
 import scala.collection.immutable.TreeMap
@@ -187,7 +187,7 @@ class ArgumentFiltering(val filtering: TreeMap[String, Either[Int, List[Int]]]) 
 }
 
 package object ArgumentFilteringSubtermSimple {
-	// From MiddeldorpHirokawa04
+	// From MiddeldorpHirokawaCADE03
 
 
 	// Algorithm 1: findSimpleArgumentFiltering
@@ -346,35 +346,75 @@ package object ArgumentFilteringSubtermSimple {
 }
 
 package object Termination {
-	def simpleDP(dps: List[DP], definedFuns: Set[String]): Option[Boolean] = {
+	def simpleDP(dps: List[DP], definedFuns: Set[String]): Proof = {
+		val proof = new Proof
+
+		proof.append("Dependency Pairs:")
+		proof.append(dps.mkString(" ; "))
+
 		// FIXME: This jumping from lists to Sets is not nice.
 		val dpGraph = DependencyPairs.dpGraph(dps.toSet, definedFuns)
 
-		dpGraph.foreach(entry => Logging.i("dp-graph", entry.toString()))
+		proof.append("Dependency Graph:")
+		proof.append(dpGraph.mkString(" ; "))
 
+		//dpGraph.foreach(entry => Logging.i("dp-graph", entry.toString()))
 		val sccs = GraphAlgorithms.tarjan(dpGraph)
 
-		// FIXME: non-termination here.
-		val status = sccs.map(scc => {
-			ArgumentFilteringSubtermSimple.findSimpleArgumentFiltering(scc) match {
-				case Some(pair) => // found argument-filtering
-					Logging.i("af", pair._2 + " for " + scc + ", " + pair._1 + " remaining")
-					simpleDP(pair._1, definedFuns)
-				case None => Logging.i("af", "no filtering found for " + scc); None
-			}}
-		)
+		if(sccs.isEmpty) {
+			proof.append("No strongly connected components")
+			proof.setStatus(Some(true))
+			proof
+		} else {
+			// FIXME: non-termination here.
+			val status = sccs.map(scc => {
+				ArgumentFilteringSubtermSimple.findSimpleArgumentFiltering(scc) match {
+					case Some(pair) => // found argument-filtering
+						//Logging.i("af", pair._2 + " for " + scc + ", " + pair._1 + " remaining")
+						proof.append("Strongly connected component:")
+						proof.append(scc.toString())
 
-		status.foldLeft(Some(true): Option[Boolean])((ret, s) => s match {
-			case Some(true) => ret
-			case Some(false) => sys.error("not implemented")
-			case None => None
-		})
+						proof.append("Argument Filtering:")
+
+						proof.append(pair._2.toString())
+
+						if (pair._1.nonEmpty) {
+							proof.append("Remaining Dependency Pairs:")
+							proof.append(pair._1.mkString(" ; "))
+
+							val subproof = simpleDP(pair._1, definedFuns)
+
+							proof.subproof(subproof)
+
+							subproof.status
+						} else {
+							proof.append("No DP remaining")
+							Some(true)
+						}
+					case None =>
+						proof.append("Strongly connected component:")
+						proof.append(scc.toString())
+						proof.append("No argument filtering found")
+
+						None
+				}
+			}
+			)
+
+			proof.setStatus(status.foldLeft(Some(true): Option[Boolean])((ret, s) => s match {
+				case Some(true) => ret
+				case Some(false) => sys.error("not implemented")
+				case None => None
+			}))
+
+			proof
+		}
 	}
 
-	def terminationTest(rules: List[Rule]): Option[Boolean] = {
+	def isTerminating(rules: List[Rule]): Proof = {
 		val deppairs = new DependencyPairs(rules)
 
-		deppairs.dps.foreach(dp => Logging.i("dps", dp.toString))
+		//deppairs.dps.foreach(dp => Logging.i("dps", dp.toString))
 
 		simpleDP(deppairs.dps.toList, deppairs.defined)
 	}

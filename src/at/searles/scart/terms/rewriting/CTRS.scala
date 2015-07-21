@@ -1,6 +1,6 @@
-package at.searles.kart.terms.rewriting
+package at.searles.scart.terms.rewriting
 
-import at.searles.kart.terms._
+import at.searles.scart.terms._
 
 import scala.annotation.tailrec
 

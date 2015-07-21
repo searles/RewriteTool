@@ -1,6 +1,6 @@
-package at.searles.kart.terms
+package at.searles.scart.terms
 
-import at.searles.kart.terms.rewriting._
+import at.searles.scart.terms.rewriting._
 
 import scala.util.parsing.combinator.RegexParsers
 

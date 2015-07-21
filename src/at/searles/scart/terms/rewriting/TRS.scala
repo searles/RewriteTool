@@ -1,7 +1,7 @@
-package at.searles.kart.terms.rewriting
+package at.searles.scart.terms.rewriting
 
-import at.searles.kart.provers.Logging
-import at.searles.kart.terms._
+import at.searles.scart.provers.Logging
+import at.searles.scart.terms._
 
 import scala.annotation.tailrec
 import scala.collection.immutable.TreeMap
@@ -60,7 +60,7 @@ class TRS(val rules : List[Rule]) extends (Term => Term) {
 
 		val rootDevels = rules.foldLeft(Set.empty[Term])((reducts, rule) => reducts ++ rule.develop(t, this))
 
-		Logging.d("devel", t + " develops to " + rootDevels + " and " + subtermDevels)
+		//Logging.d("devel", t + " develops to " + rootDevels + " and " + subtermDevels)
 
 		rootDevels ++ subtermDevels
 	}
@@ -98,10 +98,10 @@ case class Rule private(lhs: Fun, rhs: Term) {
 		// -o-> contains -=->
 		// only go into subterms if we found a match
 
-		Logging.d("rule-devel", "try to match " + t + " with " + lhs)
+		//Logging.d("rule-devel", "try to match " + t + " with " + lhs)
 
 		if(lhs matching t) {
-			Logging.d("rule-devel", this + " can develop " + t)
+			//Logging.d("rule-devel", this + " can develop " + t)
 
 			val r = t.parent.insert(rhs)
 			lhs.unmatch()

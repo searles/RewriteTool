@@ -1,7 +1,7 @@
-package at.searles.kart.provers
+package at.searles.scart.provers
 
 object Logging {
-	var level = 0
+	var level = 2
 
 	private def show(tag: String, msg: String): Unit = {
 		println(tag + "\t" + msg)

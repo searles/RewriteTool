@@ -1,6 +1,6 @@
 package at.searles.interpreter
 
-import at.searles.kart.terms.Term
+import at.searles.scart.terms.Term
 
 class Compiler {
 	//val cache = Map.empty[Int, Register]

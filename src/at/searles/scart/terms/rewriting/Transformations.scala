@@ -1,6 +1,6 @@
-package at.searles.kart.terms.rewriting
+package at.searles.scart.terms.rewriting
 
-import at.searles.kart.terms.{Term, Var, Fun, TermList}
+import at.searles.scart.terms.{Term, Var, Fun, TermList}
 
 import scala.annotation.tailrec
 
@@ -106,7 +106,7 @@ object Transformations {
 		new TRS(ctrs.rules.flatMap(rule => unravel(rule, "U" + indices.next()).reverse))
 	}
 
-	/*def structurePreserving(ctrs: CTRS): TRS = {
+	def structurePreserving(ctrs: CTRS): TRS = {
 		// This is a generalization of ABH03 to DCTRSs
 
 		/*
@@ -151,6 +151,7 @@ object Transformations {
 		val transformed = defined.foldLeft(ctrs.rules)((rules, f) => {
 
 			// FIXME: Put this into its own function
+			val list = new TermList
 
 			val ruleSplit = rules.foldRight((List.empty[ConditionalRule], List.empty[ConditionalRule]))(
 				(rule, pairs) => rule match {
@@ -167,17 +168,17 @@ object Transformations {
 			if(fRuleCount == 0) {
 				rules // no conditional rules to transform for f
 			} else {
-				val fArity = fRules.head.underlying.lhs.args.length // FIXME: We do not consider symbols with same name and different arity.
+				val fArity = fRules.head.u.lhs.args.length // FIXME: We do not consider symbols with same name and different arity.
 
-				def phibot(t: Term, list: TermList): Term = t match {
+				def phibot(t: Term): Term = t match {
 					case Fun(g, args, _) if f != g => // phibot(g(...)) = g(phibot(...))
-						val nargs = args.map(phibot(_, list))
+						val nargs = args.map(phibot)
 						list.createFun(g, nargs)
 					case Fun(g, args, _) if f == g => // phibot(f(...)) = f(phibot(...), bot, ..., bot)
 						val bot: Term = list.createFun(botLabel, Array.empty[Term])
 						val nargs = new Array[Term](args.length + fRuleCount)
 						nargs.indices.foreach(i => if (i < args.length) {
-							nargs.update(i, phibot(args(i), list))
+							nargs.update(i, phibot(args(i)))
 						} else {
 							nargs.update(i, bot)
 						})
@@ -187,15 +188,15 @@ object Transformations {
 					case _ => sys.error("not implemented")
 				}
 
-				def phiX(t: Term, list: TermList, suffix: Iterator[Int]): Term = t match {
+				def phiX(t: Term, suffix: Iterator[Int]): Term = t match {
 					case Fun(g, args, _) if f != g =>
-						val nargs = args.map(phiX(_, list, suffix))
+						val nargs = args.map(phiX(_, suffix))
 						list.createFun(g, nargs)
 					case Fun(g, args, _) if f == g =>
 						val nargs = new Array[Term](args.length + fRuleCount)
 						// fill in variables
 						nargs.indices.foreach(i => if (i < args.length) {
-							nargs.update(i, phiX(args(i), list, suffix))
+							nargs.update(i, phiX(args(i), suffix))
 						} else {
 							nargs.update(i, list.createVar(prefix + "#" + suffix.next))
 						})
@@ -210,8 +211,8 @@ object Transformations {
 
 				def auxphi(rule: ConditionalRule, suffix: Iterator[Int]): ConditionalRule = {
 					val list = new TermList
-					val lhs = phiX(rule.underlying.lhs, list, suffix).asInstanceOf[Fun]
-					val rhs = phibot(rule.underlying.lhs, list)
+					val lhs = phiX(rule.u.lhs, suffix).asInstanceOf[Fun]
+					val rhs = phibot(rule.u.rhs)
 
 					// DELME val m = auxphi(cr.mantissa, suffix) // new mantissa
 
@@ -219,9 +220,9 @@ object Transformations {
 
 					// FIXME: FoldLeft or right?
 					val cs = rule.cs.foldRight(List.empty[Condition])(
-						(cs, c) => {
+						(c, cs) => {
 							c match {
-								case Reducibility(s, t) => new Reducibility(phiX(s, m.list, suffix), phibot(t, m.list)) :: cs
+								case Reducibility(s, t) => new Reducibility(phibot(s), phiX(t, suffix)) :: cs
 								case _ => sys.error("not implemented")
 							}
 						}
@@ -255,9 +256,9 @@ object Transformations {
 
 				// lhsBot = lhs[bot]_p
 				// Will reuse lhsBot.parent
-				def splitRule(rule: ConditionalRule, p: Int): List[Rule] = {
+				def splitRule(rule: ConditionalRule, label: String, p: Int): List[Rule] = {
 					// First, for terms (t0 -> sn+1 <= s1 -> t1 etc...)
-					val ss = (rule.underlying.rhs :: rule.cs.foldLeft(List.empty[Term])(
+					val ss = (rule.u.rhs :: rule.cs.foldLeft(List.empty[Term])(
 						(l, c) => c match {
 							case Reducibility(s, t) => s :: l
 						}
@@ -271,12 +272,12 @@ object Transformations {
 					).reverse
 
 					// First I check which variables should be encoded.
-					val lhsVars = rule.underlying.lhs.vars.map(_.id).toSet
+					val lhsVars = rule.u.lhs.vars.map(_.id).toSet
 
 					// I add the empty set to the first condition because of t0.
-					val extraVars = Set.empty[Term] :: ts.map(_.vars.map(_.id).toSet.filter(!lhsVars.contains)) // deterministic extra variables
+					val extraVars = Set.empty[String] :: ts.map(_.vars.map(_.id).toSet.filter(!lhsVars.contains(_))) // deterministic extra variables
 					val neededVars = ss.zip(extraVars).map {
-							case (s, vs) => vs ++ s.vars.map(_.id).toSet.filter(!lhsVars.contains)
+							case (s, vs) => vs ++ s.vars.map(_.id).toSet.filter(!lhsVars.contains(_))
 						} // extra variables required for a certain condition.
 
 					// A variable x is encoded in a <>i-condition if
@@ -288,13 +289,14 @@ object Transformations {
 					// for needed variables backwards.
 					// the intersection of both are the conditions to be encoded.
 
-					@tailrec def integrateRight(l: List[Set]): List[Set] = l match {
+					def integrateRight[A](l: List[Set[A]]): List[Set[A]] = l match {
 						case h :: t => h ++ t.flatten :: integrateRight(t)
+						case _ => List.empty[Set[A]]
 					}
 
-					@tailrec def integrateLeft(l: List[Set]): List[Set] = l match {
-						case h :: t :: tt => h :: integrate(t ++ h :: tt)
-						case h :: _ => h
+					def integrateLeft[A](l: List[Set[A]]): List[Set[A]] = l match {
+						case h :: t :: tt => h :: integrateLeft(t ++ h :: tt)
+						case h :: _ => List(h)
 						case _ => sys.error("not for empty lists")
 					}
 
@@ -329,93 +331,63 @@ object Transformations {
 						case (e, n) => e.intersect(n)
 					}
 
-					val list = new TermList
+					// We got the variables to be encoded along with all others
 
 					val bot = list.createFun("bot", Array.empty[Term])
 
-					val lhs = rule.underlying.lhs.replace(bot, p)
+					val lhs = rule.u.lhs.replace(bot, p) // l[bot]_p
 
+					// t = lhs of rule
+					def cToRule(t: Term, index: Int, c: Reducibility, varSet: Set[String]): (Term, Rule) = {
+						val vars = varSet.toList.map(list.createVar)
 
-					// FIXME: Finish!
+						val args0 = list.insert(c.s) :: vars
+						val args1 = list.insert(c.t) :: vars
 
-					List.empty[Rule]
+						// conditional argument
+						val carg0 = list.createFun("tp#" + label + "#" + index, args0.toArray)
+						val carg1 = list.createFun("tp#" + label + "#" + index, args1.toArray)
+
+						val rule = Rule.make(t, lhs.replace(carg0, p))
+
+						(lhs.replace(carg1, p), rule)
+					}
+
+					val condVars = rule.cs.zip(encodedVars)
+
+					// rules, last index and last term
+					val tiRs = condVars.foldLeft((lhs, 1, List.empty[Rule]))(
+						(tupel, cv) => {
+							val tr = cToRule(tupel._1, tupel._2,
+								cv._1.asInstanceOf[Reducibility], cv._2)
+
+							(tr._1, tupel._2 + 1, tr._2 :: tupel._3)
+						})
+
+					// we need to add the last rule
+					val rhs = list.insert(rule.u.rhs)
+
+					val rules = Rule.make(tiRs._1, rhs) :: tiRs._3
+
+					// and we reverse it to get a nice proper order
+					rules.reverse
 				}
-
-
-				/*def auxSplitRule(rule: ConditionalRule, p: Int): (Term, List[Rule], Int) = {
-					rule.cs.foldRight()
-						case List.empty =>
-					}
-
-
-					val msplit = rule.mantissa.r match {
-						case Left(_) => (new TermList().createFun(botLabel, Array.empty[Term]), List.empty[Rule], 1)
-						case Right(rho) => auxSplitRule(rho, p)
-					}
-
-					// msplit._1 contains termlist for rule!
-					val u = msplit._1 // conditional term on lhs
-
-					// step 1: build lhs of rule: l[u]_p
-					val l = rule.lhs().replace(u, p) // new rule is created in u.parent.
-
-					// step 2: build rhs of rule: l[u']_p where u' = tp#index(s, vars)
-					// 		2.a: get new function symbol
-					val sym = tupelLabel + "#" + msplit._3
-
-					//     	2.b: get variables to be encoded + conditional term
-					rule.c match {
-						case Reducibility(s, t) =>
-							val vArgs = s :: u.vars
-							val v = u.parent.createFun(sym, vArgs.toArray)
-
-							val r = l.replace(v, p)
-
-							val transformedRule = new Rule(l.asInstanceOf[Fun], r)
-
-							// next we prepare the term that will be returned and
-							// used for the next rule
-							val nextUArg = new TermList().insert(t) // first, the rhs of the condition
-						val nextU = v.replace(nextUArg, 0)
-
-							(nextU, transformedRule :: msplit._2, msplit._3 + 1)
-						case _ => sys.error("not implemented")
-					}
-				}
-
-				def splitRule(rule: ConditionalRule, p: Int): List[Rule] = {
-					val msplit = auxSplitRule(rule, p)
-					// add last rule
-					val u = msplit._1 // conditional term on lhs
-
-					// build lhs of rule: l[u]_p
-					val l = rule.lhs().replace(u, p) //fixme could avoid cast if replace would return subtype
-
-					val r = l.parent.insert(rule.rhs())
-
-					Rule(l.asInstanceOf[Fun], r) :: msplit._2 // reverse order
-				}*/
 
 				// Everything is in place. Let's transform the system
 
 				// first, conditional f-rules
-				val transformedFRules = fRules.map(phi).foldLeft((List.empty[Rule], fArity))(
-					(pair, rule) => {
-						rule.r match {
-							case Right(r) => (pair._1 ++ splitRule(r, pair._2), pair._2 + 1)
-							case _ => sys.error("implementation error!")
-						}
+				val transformedFRules = fRules.map(phi).foldLeft((List.empty[Rule], 1))(
+					(tupel, rule) => {
+						val ret = splitRule(rule, f + tupel._2, fArity + tupel._2 - 1)
+						// FIXME: Lists are reversed and appended very often. Can be avoided.
+						(tupel._1 ++ ret, tupel._2 + 1)
 					}
-				)
+				)._1
 
-				// then all other rules. add the transformed fRules afterwards
-				transformedFRules._1.foldLeft(gRules.map(phi))(
-					(transformedRules, rule) => new ConditionalRule(rule) :: transformedRules
-				)
+				transformedFRules.map(ConditionalRule.make(_, List.empty[Condition])) ++ gRules.map(phi)
 			}
 		})
 
-
-		new TRS(transformed.map(r => r.underlying))
-	}*/
+		new TRS(transformed.map(r => r.u))
+	}
 }

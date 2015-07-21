@@ -1,6 +1,6 @@
-package at.searles.kart.terms
+package at.searles.scart.terms
 
-import at.searles.kart.provers.Logging
+import at.searles.scart.provers.Logging
 
 import scala.annotation.tailrec
 /**

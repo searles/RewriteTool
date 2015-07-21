@@ -1,8 +1,8 @@
-package at.searles.kart.coco
+package at.searles.scart.coco
 
-import at.searles.kart.coco.ConditionType.ConditionType
-import at.searles.kart.terms._
-import at.searles.kart.terms.rewriting._
+import at.searles.scart.coco.ConditionType.ConditionType
+import at.searles.scart.terms._
+import at.searles.scart.terms.rewriting._
 
 import scala.util.parsing.combinator.RegexParsers
 
@@ -21,6 +21,11 @@ object TPDBParser extends RegexParsers {
 	def ID: Parser[String] = """[a-zA-Z]\w*'*""".r
 
 	def SYM: Parser[String] = """[+\-*/^<>=:.]+""".r
+
+	def trsOrCtrs: Parser[Either[TRS, CTRS]] = ( ctrsspec | trsspec ) ^^ {
+		case ctrs : CTRS => Right(ctrs)
+		case trs : TRS => Left(trs)
+	}
 
 	def ctrsspec: Parser[CTRS] =  conditiontype >>
 		(ctype => varspec >> {
