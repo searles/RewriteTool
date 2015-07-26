@@ -123,6 +123,9 @@ sealed abstract class Term(val parent: TermList, val debruijn: Int) extends Orde
 	}
 
 	override def compare(t: Term): Int = {
+		if(parent ne t.parent)
+			println("hello") // FIXME DELME
+
 		assert(parent eq t.parent)
 		pos - t.pos // FIXME subterms are smaller
 	}
@@ -371,8 +374,9 @@ sealed abstract class Term(val parent: TermList, val debruijn: Int) extends Orde
 		vps
 	}*/
 
-
+	// linearizes term
 	def lin(prefix: String): Term = {
+		// FIXME: In CTRS, I implemented for WLL a variable-count. Maybe this is useful here too.
 		val usedVars = collection.mutable.Set.empty[String]
 		val index = Stream.from(1).iterator
 
@@ -382,8 +386,9 @@ sealed abstract class Term(val parent: TermList, val debruijn: Int) extends Orde
 				case v: Var => usedVars.add(v.id) ; None // nothing replaced
 				case t: Term =>
 					val replacements = t.map(aux) // get list [ None, Some(t), Some(u), None ] of terms that were replaced
+
 					val v = replacements.indices.foldLeft(t)((u, i) => replacements.apply(i) match {
-						case Some(v) => u.replace(v, i)
+						case Some(vv) => u.replace(vv, i)
 						case None => u
 					})
 
@@ -659,11 +664,11 @@ sealed abstract class Term(val parent: TermList, val debruijn: Int) extends Orde
 
 case class Fun(f: String, args: Array[Term], p: TermList) extends Term(p, args.foldLeft(0)(_ max _.debruijn)) {
 	//override def toString() : String = pos + ":" + f + " " + args.map(_.pos)
-	override def toString(): String = f + "(" + args.mkString(", ") + ")" + (if(mark) "*" else "")
+	override def toString(): String = f + "(" + args.mkString(", ") + ")" + (if(mark) "*" else "") + (if(link != null) ">>" else "")
 }
 
 case class Var(id: String, p: TermList) extends Term(p, 0) {
-	override def toString(): String = id + (if(mark) "*" else "")
+	override def toString(): String = id + (if(mark) "*" else "") + (if(link != null) ">>" else "")
 }
 
 case class App(l: Term, r: Term, p: TermList) extends Term(p, l.debruijn max r.debruijn) {

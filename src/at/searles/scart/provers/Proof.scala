@@ -1,6 +1,9 @@
 package at.searles.scart.provers
 
 class Proof {
+	// FIXME: Convert to tree like proof trees!
+	// FIXME: Termination then is an extension of proof, containing several subproofs!
+	// FIXME: Allow multithreading!
 	var proof = List.empty[String]
 	var status: Option[Boolean] = None
 
@@ -9,18 +12,22 @@ class Proof {
 
 	def subproof(sub: Proof): Unit = {
 		proof = sub.proof.foldRight(proof)((line, list) => ("\t" + line) :: list)
+		append("\n")
 	}
 
 	def setStatus(status: Option[Boolean]) = this.status = status
 
 	def show() = {
 		status match {
-			case None => println("MAYBE")
-			case Some(true) => println("YES")
-			case Some(false) => println("NO")
-		}
+			case None =>
+				println("MAYBE")
 
-		proof.reverse.foreach(println)
+				// FIXME: For debugging
+				proof.reverse.foreach(println)
+			case Some(state) =>
+				println(if(state) "YES" else "NO")
+				proof.reverse.foreach(println)
+		}
 	}
 
 	override def toString = {

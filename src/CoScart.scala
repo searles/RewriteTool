@@ -1,5 +1,5 @@
 import at.searles.scart.coco.TPDBParser
-import at.searles.scart.provers.Confluence
+import at.searles.scart.provers.{CTRSConfluence, TRSConfluence, Confluence}
 import at.searles.scart.terms.rewriting.Transformations
 
 import scala.io.Source
@@ -31,22 +31,15 @@ object CoScart extends scala.App {
 	parsed.get match {
 		case Left(rs) =>
 			// check for confluence
-			val proof = Confluence.isConfluent(rs.rules)
+			val proof = TRSConfluence.isConfluent(rs.rules)
 			proof.show()
 		case Right(ctrs) =>
-			if(!ctrs.isDeterministic) {
+			if(!ctrs.rules.forall(rule => rule.isOriented && rule.getType <= 3)) {
 				println("UNSUPPORTED")
 				System.exit(0)
 			}
 
-			// FIXME: Soundness-check!
-
-			val rs = Transformations.structurePreserving(Transformations.toCtr(ctrs))
-
-			val proof = Confluence.isConfluent(rs.rules)
-
-			if(proof.status == Some(false)) proof.setStatus(None) // switch no to maybe.
-
+			val proof = CTRSConfluence.isConfluent(ctrs.rules)
 			proof.show()
 	}
 }

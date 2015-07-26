@@ -47,8 +47,8 @@ class TRS(val rules : List[Rule]) extends (Term => Term) {
 
 	def applyAll(t: Term, target: TermList): Set[Term] =
 		rules.foldLeft(Set.empty[Term])((reducts, rule) => rule.apply(t, target) match {
-			case null => println(t + " -> null"); reducts
-			case u => println(t + " -> " + u); reducts + u
+			case null => reducts
+			case u => reducts + u
 		})
 
 	def develop(t: Term): Set[Term] = {
@@ -58,7 +58,10 @@ class TRS(val rules : List[Rule]) extends (Term => Term) {
 			set.flatMap(u => tpDevels.map(u.replace(_, p)))
 		})
 
-		val rootDevels = rules.foldLeft(Set.empty[Term])((reducts, rule) => reducts ++ rule.develop(t, this))
+		val rootDevels = rules.foldLeft(Set.empty[Term])((reducts, rule) => {
+			val tDevels = rule.develop(t, this)
+			reducts ++ tDevels
+		})
 
 		//Logging.d("devel", t + " develops to " + rootDevels + " and " + subtermDevels)
 
@@ -66,6 +69,20 @@ class TRS(val rules : List[Rule]) extends (Term => Term) {
 	}
 
 	def defined(): Set[String] = rules.foldLeft(Set.empty[String])(_ + _.lhs.f)
+
+	def isNF(t: Term): Boolean =
+		// checks whether there is any rule st
+		// a subterm of t matches the lhs.
+		t.findFirst((u: Term) => {
+			rules.exists(rule => {
+				if(rule.lhs.matching(u)) {
+					rule.lhs.unmatch()
+					true
+				} else false
+			})
+		}).isEmpty
+
+
 }
 
 object Rule {
@@ -104,6 +121,12 @@ case class Rule private(lhs: Fun, rhs: Term) {
 			//Logging.d("rule-devel", this + " can develop " + t)
 
 			val r = t.parent.insert(rhs)
+
+			if(r.parent ne t.parent) {
+				// FIXME DELME This must be a bug???
+				sys.error("I think you caught a StackOverflow before and now the data structures are tangled up?")
+			}
+
 			lhs.unmatch()
 
 			// Get variable positions
@@ -160,7 +183,9 @@ case class Rule private(lhs: Fun, rhs: Term) {
 		}).isEmpty)
 	}
 
-	def renaming(blacklist: Set[String]): Rule = {
+	def renaming(blacklist: Set[String]): Rule = list.renaming(blacklist, this,
+		(list: TermList) => Rule.make(list.insert(lhs), list.insert(rhs)))
+	/*{
 		// FIXME Bug in here!
 		val sigma = list.renaming(blacklist)
 
@@ -170,7 +195,7 @@ case class Rule private(lhs: Fun, rhs: Term) {
 			sigma.foreach(entry => entry._1.link = tl.createVar(entry._2))
 
 			// now create rule
-			val ret = Rule.make(tl.insert(lhs), tl.insert(rhs))
+			val ret =
 
 			// and clean up
 			sigma.foreach(entry => entry._1.link = null)
@@ -179,6 +204,6 @@ case class Rule private(lhs: Fun, rhs: Term) {
 			// no renaming necessary
 			this
 		}
-	}
+	}*/
 }
 

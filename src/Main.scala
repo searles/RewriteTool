@@ -62,7 +62,7 @@ object Main extends scala.App {
 			"f(f(x)) -> g(x)"
 		).get
 
-		val cps = Confluence.criticalpairs(trs.rules)
+		val cps = TRSConfluence.criticalpairs(trs.rules)
 
 		println("cps:")
 		cps.foreach(println)
@@ -114,6 +114,7 @@ object Main extends scala.App {
 		// for each file in trs.tag, read it
 		val blacklist = List("424.trs", "425.trs")
 		val trsFiles = Source.fromFile("COCO-DB/tags/trs.tag").getLines().filter(!blacklist.contains(_))
+		//val trsFiles = List("127.trs")
 		val terminatingFiles = Source.fromFile("COCO-DB/tags/terminating.tag").getLines().toSet
 		val confluentFiles = Source.fromFile("COCO-DB/tags/confluent.tag").getLines().toSet
 		val nonconfluentFiles = Source.fromFile("COCO-DB/tags/non_confluent.tag").getLines().toSet
@@ -126,81 +127,69 @@ object Main extends scala.App {
 			val source = Source.fromFile("COCO-DB/TRS/" + filename).getLines().mkString("\n")
 			val trs = TPDBParser.parse(TPDBParser.trsspec, source).get
 
-			println("Checking " + filename + "...")
+			val proof = TRSConfluence.isConfluent(trs.rules)
 
-			trs.rules.foreach(println)
+			//proof.show()
 
-			val isConf = Confluence.isConfluent(trs.rules).status
+			val isConf = proof.status
 			val taggedConf =
 					if(confluentFiles.contains(filename)) Some(true)
 					else if(nonconfluentFiles.contains(filename)) Some(false)
 					else None
 
 			if(isConf == taggedConf) {
-				println("SUCCESS: " + isConf)
-				if(isConf.isDefined) positive = filename :: positive
-			} else if(isConf.isDefined && taggedConf.isDefined) sys.error("WRONG RESULT: " + isConf + ", " + taggedConf)
+				if(isConf.isDefined) {
+					positive = filename :: positive
+
+					println(filename + "...")
+					trs.rules.foreach(println)
+					println("--------------------------------------\n\n")
+					proof.show()
+					println("\n======================================\n")
+				}
+			} else if(isConf.isDefined && taggedConf.isDefined) {
+				proof.show()
+				sys.error("WRONG RESULT: " + isConf + ", " + taggedConf)
+			}
 			else {
-				println("NO SUCCESS")
 				negative = filename :: negative
 			}
-
-			(1 to 40).foreach { i => print("=") }
-			println("\n\n")
 		})
 
 		println("conf property could be shown of the following: " + positive.length + " ==> " + positive.reverse)
 		println("conf property could not be shown of the following: " + negative.length + " ==> " + negative.reverse)
 	}
 
-	// trsConfCheck()
+	trsConfCheck()
 
 	def ctrsCheck(): Unit = {
 		val ctrsFiles = Source.fromFile("COCO-DB/tags/ctrs.tag").getLines().filter(_ != "313.trs")
 
-		ctrsFiles.foreach(filename => {
-			println("\n==========================================")
-			println("Checking \"" + filename + "\"...")
+		var answered = 0
+		var unanswered = 0
 
+		ctrsFiles.foreach(filename => {
 			val source = Source.fromFile("COCO-DB/CTRS/" + filename).getLines().mkString("\n")
 			val ctrs = TPDBParser.parse(TPDBParser.ctrsspec, source).get
 
-			//ctrs.rules.foreach(println)
+			if(ctrs.rules.forall(rule => rule.isOriented && rule.getType <= 3)) {
+				val proof = CTRSConfluence.isConfluent(ctrs.rules)
+				// proof.show()
 
-			if(ctrs.isDeterministic) {
-				// FIXME: Also check deterministic condition
-				val cctrs = Transformations.toCtr(ctrs)
-				val trs0 = Transformations.structurePreserving(cctrs)
-				val trs1 = Transformations.unravel(ctrs)
-				val trs2 = Transformations.unravel(cctrs)
-
-				//println("------------------------------------------")
-				//ctrs.rules.foreach(println)
-
-				val confs = List(trs0, trs1, trs2).map(trs => {
-					//trs.rules.foreach(println)
-
-					val isTerminating = Termination.isTerminating(trs.rules).status
-					println("terminating " + isTerminating)
-
-					val isConfluent = Confluence.isConfluent(trs.rules).status
-					println("confluent " + isConfluent)
-
-					isConfluent
-				})
-
-				if(confs.head != confs.tail.head || confs.head != confs.tail.tail.head) {
-					println(filename + ": " + confs)
+				if(proof.status.isDefined) {
+					answered = answered + 1
+					println(filename + "...")
+					ctrs.rules.foreach(println)
+					println("--------------------------------------\n\n")
+					proof.show()
+					println("======================================\n\n")
+				} else {
+					unanswered = unanswered + 1
 				}
 			}
-
-			// FIXME: Confluence criteria:
-			// 1. Orthogonality
-			// 2. Confluence of transformed system
-			// 2a. Joinable critical pairs
-
-			println("------------------------------------------")
 		})
+
+		println("Answered: " + answered + "/" + unanswered)
 	}
 
 	ctrsCheck()
@@ -221,8 +210,6 @@ object Main extends scala.App {
 	}
 
 	//ransformCheck()
-
-	//ctrsCheck()
 
 	def test(): Unit = {
 		val t = new TermList().term("w(x)").get
@@ -251,4 +238,30 @@ object Main extends scala.App {
 	}
 
 	//modularityCheck
+
+	def ccpCheck(): Unit = {
+		val ctrs = CTRSParser.parse(
+			"<(0,s(x)) -> true()\n" +
+			"<(x,0) -> false()\n" +
+			"<(s(x),s(y)) -> <(x,y)\n" +
+			"min(x,y) -> x <= <(x,y) -> true()\n" +
+			"min(x,y) -> y <= <(x,y) -> false()\n"
+		).get
+
+		println(CTRSConfluence.criticalpairs(ctrs.rules).mkString(" \n "))
+	}
+
+	def testNonTermNorm(): Unit = {
+		val trs = TRSParser.parse("f(x,y) -> f(y,x)").get
+		val t = new TermList().term("f(0,1)").get
+
+		val rule = trs.rules.head
+
+		t.normalize(trs)
+
+		println(t)
+		println(rule.lhs.link)
+	}
+
+	//testNonTermNorm()
 }

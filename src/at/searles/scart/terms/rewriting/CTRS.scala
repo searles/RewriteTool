@@ -131,7 +131,36 @@ object ConditionalRule {
 // t0 -> sn+1 <= s1 ->* t1... na, weird.
 
 case class ConditionalRule private(u: Rule, cs: List[Condition]) {
-	override def toString = u.toString + " <= " + cs.mkString(", ")
+	def renaming(blacklist: Set[String]) =
+		u.list.renaming(blacklist, this,
+			(list: TermList) => ConditionalRule.make(list.insert(u.lhs), list.insert(u.rhs), cs.map(_.copy(list))))
+	/*{
+		// FIXME Bug in here!
+		// Very much copy/paste from Rule
+		val sigma = u.list.renaming(blacklist)
+
+		if (sigma.nonEmpty) {
+			// create TermList, add variables and link them
+			val tl = new TermList
+			sigma.foreach(entry => entry._1.link = tl.createVar(entry._2))
+
+			// now create rule
+			// FIXME: Generic version of this: renaming[A](blacklist: Set[String], list: TermList, fn: () => A)
+			val ret = ConditionalRule.make(tl.insert(u.lhs), tl.insert(u.rhs), cs.map(_.copy(tl)))
+
+			// and clean up
+			sigma.foreach(entry => entry._1.link = null)
+			ret
+		} else {
+			// no renaming necessary
+			this
+		}
+	}*/
+
+	override def toString: String = {
+		val cString = if(cs.nonEmpty) " <= " + cs.mkString(", ") else ""
+		u.toString + cString
+	}
 
 	def apply(t: Term, ctrs: CTRS, target: TermList): Term = {
 		if(u.lhs.matching(t)) {
@@ -153,15 +182,124 @@ case class ConditionalRule private(u: Rule, cs: List[Condition]) {
 		case _ => false
 	}
 
+	def isJoin: Boolean = cs.forall {
+		case _: Joinability => true
+		case _ => false
+	}
+
 	def isDeterministic: Boolean = cs.foldLeft((u.lhs.varIds, true))((vss, c) =>
 		if(vss._2) c match {
 			case Reducibility(s, t) => (vss._1 ++ t.varIds, s.varIds.subsetOf(vss._1))
-			case _ => (vss._1, false) // could stop right here...
+			case _ => (vss._1, false) // FIXME could stop right here...
 		} else (vss._1, false)
 	)._2
+
+	def getType: Int = {
+		val lVars = u.lhs.varIds
+		val rVars = u.rhs.varIds
+		val cVars = cs.flatMap{
+			case Reducibility(s, t) => s.varIds ++ t.varIds
+			case Joinability(s, t) => s.varIds ++ t.varIds
+			case SemiEq(s, t) => s.varIds ++ t.varIds
+			case _ => sys.error("not supported")
+		}.toSet
+
+		if(((cVars ++ rVars) -- lVars).isEmpty) 1
+		else if((rVars -- lVars).isEmpty) 2
+		else if((rVars -- (lVars ++ cVars)).isEmpty) 3
+		else 4
+	}
+
+	// FIXME: Difference to DCTRSs?
+	def isProperlyOriented: Boolean = {
+		getType match {
+			case 4 => false
+			case 3 =>
+				def aux(varSet: Set[String], cs: List[Condition]): Boolean = cs match {
+					case Reducibility(s, t) :: rest =>
+						if((s.varIds -- varSet).isEmpty)
+							aux(varSet ++ t.varIds, rest)
+						else
+							false
+					case _ if cs.isEmpty => true
+					case _ => sys.error("not supported")
+				}
+
+				aux(u.lhs.varIds, cs)
+
+			case _ => true
+		}
+	}
+
+	// right stable: all variables in the rhs of conditions
+	// are fresh.
+	// TODO: Interesting for OpConf!
+	def isRightStable(utrs: TRS): Boolean = {
+		def aux(varSet: Set[String], cs: List[Condition]): Boolean = cs match {
+			case Reducibility(s, t) :: rest =>
+				val tVars = t.varIds
+
+				val varSet2 = varSet ++ s.varIds
+
+				if(varSet2.intersect(tVars).isEmpty) {
+					// FIXME: Keep underlying TRS somewhere.
+					// TODO: Constructor check necessary?
+					utrs.isNF(t) && aux(varSet2 ++ tVars, rest)
+				} else false
+			case _ if cs.isEmpty => true
+			case _ => sys.error("not supported")
+		}
+
+		aux(u.lhs.varIds, cs)
+	}
+
+	def isWLL: Boolean = {
+		// all variables occurring more than once in l, t1, ..., tn are erased
+		val lVars = cs.foldLeft(u.lhs.vars)((vars, c) => c.asInstanceOf[Reducibility].t.vars ++ vars)
+		val rVars = cs.foldRight(u.rhs.varIds)((c, vars) => vars ++ c.asInstanceOf[Reducibility].s.varIds)
+
+		// count variables
+		// FIXME: might be useful in term for flat/shallow-criteria
+		val varMap = lVars.foldLeft(Map.empty[String, Int])((m, v) => {
+			// FIXME: Compare to RLE-compression :)
+			val count = if (m.contains(v.id)) m(v.id) + 1 else 1
+			m + (v.id -> count)
+		})
+
+		val nonlinearVars = varMap.filter(entry => entry._2 > 1).keySet
+
+		val commons = rVars.intersect(nonlinearVars)
+
+		commons.isEmpty
+	}
+
+	def isWRL: Boolean = {
+		// all variables occurring more than once in r, s1, ..., sn do not occur in lVars
+		// exactly symmetric to WLL
+		val rVars = cs.foldLeft(u.rhs.vars)((vars, c) => c.asInstanceOf[Reducibility].s.vars ++ vars)
+		val lVars = cs.foldRight(u.lhs.varIds)((c, vars) => vars ++ c.asInstanceOf[Reducibility].t.varIds)
+
+		// count variables
+		// FIXME: might be useful in term for flat/shallow-criteria
+		val varMap = rVars.foldLeft(Map.empty[String, Int])((m, v) => {
+			// FIXME: Compare to RLE-compression :)
+			val count = if (m.contains(v.id)) m(v.id) + 1 else 1
+			m + (v.id -> count)
+		})
+
+		val nonlinearVars = varMap.filter(entry => entry._2 > 1).keySet
+
+		val commons = lVars.intersect(nonlinearVars)
+
+		commons.isEmpty
+	}
+
 }
 
 class CTRS(val rules : List[ConditionalRule]) extends (Term => Term) {
+	// underlying trs
+	val utrs = new TRS(rules.map(_.u))
+
 	def defined(): Set[String] = rules.foldLeft(Set.empty[String])(_ + _.u.lhs.f)
 
 	def apply(t: Term): Term = apply(t, t.parent)
@@ -179,5 +317,14 @@ class CTRS(val rules : List[ConditionalRule]) extends (Term => Term) {
 	def isOriented: Boolean = rules.forall(_.isOriented)
 
 	def isDeterministic: Boolean = rules.forall(_.isDeterministic)
+
+	def isRightStable: Boolean = rules.forall(_.isRightStable(utrs))
+
+	def isProperlyOriented: Boolean = rules.forall(_.isProperlyOriented)
+
+	// the following two are important for soundness
+	def isWLL: Boolean = rules.forall(_.isWLL) // FIXME
+
+	def isWRL: Boolean = false // FIXME
 }
 

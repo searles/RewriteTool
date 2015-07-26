@@ -52,7 +52,7 @@ class TermParsers extends RegexParsers {
 		symbol(parent, bindings)
 
 	def lambda(parent: TermList, bindings: List[String]):Parser[Term] = {
-		// >> resemles ~ but additionally reuses the argument of the previous one.
+		// >> resembles ~ but additionally reuses the argument of the previous one.
 		("\\" ~> rep(ID) <~ ".") >> {newids => expr(parent, newids.reverse ++ bindings) ^^ {
 			newids.foldLeft(_)((u, id) => parent.createLambda(u))
 		}}

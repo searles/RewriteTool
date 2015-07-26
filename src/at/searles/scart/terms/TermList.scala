@@ -66,7 +66,27 @@ class TermList extends Iterable[Term] {
 		})
 	}
 
+	// Generic version of renaming; can be used to rename rules, conditional rules etc...
+	def renaming[A](blacklist: Set[String], original: A, factory: TermList => A): A = {
+		// FIXME Bug in here!
+		val sigma = renaming(blacklist)
 
+		if (sigma.nonEmpty) {
+			// create TermList, add variables and link them
+			val newlist = new TermList
+			sigma.foreach(entry => entry._1.link = newlist.createVar(entry._2))
+
+			// now create rule
+			val ret = factory(newlist)
+
+			// and clean up
+			sigma.foreach(entry => entry._1.link = null)
+			ret
+		} else {
+			// no renaming necessary
+			original
+		}
+	}
 
 	// Parser stuff
 

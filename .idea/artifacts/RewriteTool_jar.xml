@@ -1,0 +1,9 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="RewriteTool:jar">
+    <output-path>$PROJECT_DIR$/out/artifacts/RewriteTool_jar</output-path>
+    <root id="archive" name="RewriteTool.jar">
+      <element id="module-output" name="RewriteTool" />
+      <element id="extracted-dir" path="/usr/share/java/scala-library.jar" path-in-jar="/" />
+    </root>
+  </artifact>
+</component>
